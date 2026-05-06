@@ -16,7 +16,20 @@ let _scrollProgressTimer = null;
 let _lastSavedProgressKey = '';
 let _ignoreScrollTrackingUntil = 0;
 
-const audio = document.getElementById('tts-audio');
+// Two audio elements for gapless double-buffering
+const _audioA = document.getElementById('tts-audio');
+const _audioB = (() => { const a = new Audio(); a.preload = 'auto'; return a; })();
+let audio = _audioA; // currently active (playing) element
+
+// Client-side cache: segIdx -> Promise<{audio_url, duration_sec, cache_key, text}>
+let _segCache = new Map();
+
+// Which segment index is pre-buffered in the standby element, and its data
+let _preloadIdx = -1;
+let _preloadData = null;
+
+function _standby() { return audio === _audioA ? _audioB : _audioA; }
+function _swapAudio() { audio = (audio === _audioA ? _audioB : _audioA); }
 
 function clampSegmentIndex(idx, segList = segments) {
   const parsed = Number.parseInt(idx, 10);
@@ -188,6 +201,7 @@ async function openChapter(chapterId, options = {}) {
   }
 
   stopPlayback();
+  _segCache = new Map();
   currentChapterId = chapterId;
   currentSegIdx    = 0;
 
@@ -252,10 +266,48 @@ function jumpTo(idx) {
 
 // ── Playback ──────────────────────────────────────────────────────────────────
 
+function fetchSegmentData(idx) {
+  if (!_segCache.has(idx)) {
+    _segCache.set(idx, fetch('/api/tts/generate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ book_id: BOOK_ID, chapter_id: currentChapterId, segment_index: idx }),
+    }).then(r => {
+      if (!r.ok) return r.json().then(e => { throw new Error(e.error || `HTTP ${r.status}`); });
+      return r.json();
+    }));
+  }
+  return _segCache.get(idx);
+}
+
+async function _schedulePreload(playingIdx) {
+  const nextIdx = playingIdx + 1;
+  if (nextIdx >= segments.length || !isPlaying) return;
+
+  // Fire off generate requests for 2–4 ahead in parallel to warm the server cache
+  for (let i = 2; i <= 4; i++) {
+    const ahead = playingIdx + i;
+    if (ahead < segments.length) fetchSegmentData(ahead);
+  }
+
+  try {
+    const data = await fetchSegmentData(nextIdx);
+    if (!isPlaying || _preloadIdx === nextIdx) return;
+
+    const sb = _standby();
+    sb.src = data.audio_url;
+    sb.playbackRate = speedMultiplier;
+    _preloadIdx = nextIdx;
+    _preloadData = data;
+  } catch (e) {
+    // silent — playback will continue without the preload, just with a small gap
+  }
+}
+
 async function playSegment(idx) {
   if (idx >= segments.length) { stopPlayback(); return; }
 
-  isPlaying      = true;
+  isPlaying = true;
   setCurrentSegment(idx, { highlight: true, save: true });
 
   const seg = segments[idx];
@@ -263,65 +315,33 @@ async function playSegment(idx) {
   charEl.textContent = seg.character_name || 'Narrator';
 
   try {
-    const r = await fetch('/api/tts/generate', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ book_id: BOOK_ID, chapter_id: currentChapterId, segment_index: idx }),
-    });
+    let data;
 
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      charEl.textContent = err.error || 'TTS error';
-      stopPlayback();
-      return;
+    if (_preloadIdx === idx && _preloadData) {
+      // Standby element is already buffered with this segment — swap and play instantly
+      _swapAudio();
+      data = _preloadData;
+      _preloadIdx = -1;
+      _preloadData = null;
+    } else {
+      data = await fetchSegmentData(idx);
+      if (!isPlaying) return;
+      audio.src = data.audio_url;
     }
 
-    const data = await r.json();
-
-    // Keep the prefetch buffer full
-    ensurePrefetchBuffer(idx);
-
-    audio.src          = data.audio_url + '?t=' + Date.now();
     audio.playbackRate = speedMultiplier;
     startWordHighlight(idx, data.duration_sec);
     await audio.play();
 
+    _schedulePreload(idx);
+
   } catch(e) {
-    document.getElementById('pb-character').textContent = e.message;
+    charEl.textContent = e.message;
     stopPlayback();
   }
 }
 
-let currentPrefetchController = null;
-
-async function ensurePrefetchBuffer(startIdx) {
-  if (currentPrefetchController) {
-    currentPrefetchController.abort();
-  }
-  currentPrefetchController = new AbortController();
-  const signal = currentPrefetchController.signal;
-
-  // Prefetch up to 3 segments ahead sequentially
-  for (let i = 1; i <= 3; i++) {
-    const targetIdx = startIdx + i;
-    if (targetIdx >= segments.length) break;
-    
-    if (signal.aborted || !isPlaying) break;
-
-    try {
-      await fetch('/api/tts/generate', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ book_id: BOOK_ID, chapter_id: currentChapterId, segment_index: targetIdx }),
-        signal
-      });
-    } catch (e) {
-      break;
-    }
-  }
-}
-
-audio.addEventListener('ended', () => {
+function _onAudioEnded() {
   stopWordHighlight();
   if (!isPlaying) return;
   const next = currentSegIdx + 1;
@@ -330,13 +350,20 @@ audio.addEventListener('ended', () => {
     queueProgressSave(currentChapterId, currentSegIdx);
     stopPlayback();
   }
-});
+}
+_audioA.addEventListener('ended', _onAudioEnded);
+_audioB.addEventListener('ended', _onAudioEnded);
 
 function stopPlayback() {
   isPlaying = false;
   stopWordHighlight();
-  audio.pause();
-  audio.src = '';
+  _audioA.pause();
+  _audioB.pause();
+  _audioA.src = '';
+  _audioB.src = '';
+  audio = _audioA; // reset active to primary
+  _preloadIdx = -1;
+  _preloadData = null;
   if (currentChapterId) queueProgressSave(currentChapterId, currentSegIdx);
   const btn = document.getElementById('btn-play');
   btn.innerHTML = '&#9654;';
@@ -442,7 +469,8 @@ document.getElementById('btn-prev-seg').onclick = () => {
 document.getElementById('speed-slider').oninput = function() {
   speedMultiplier = parseFloat(this.value);
   document.getElementById('speed-val').textContent = speedMultiplier.toFixed(1) + '×';
-  audio.playbackRate = speedMultiplier;
+  _audioA.playbackRate = speedMultiplier;
+  _audioB.playbackRate = speedMultiplier;
 };
 
 // ── Sidebar toggle ────────────────────────────────────────────────────────────
