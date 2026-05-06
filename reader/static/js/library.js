@@ -20,6 +20,12 @@ async function loadBooks() {
     const coverHtml = b.cover_url
       ? `<img src="${b.cover_url}" alt="" loading="lazy">`
       : `<div class="book-cover-placeholder">${esc(b.title)}</div>`;
+    const hasProgress = Number.isInteger(b.progress_chapter_id) || Number.isInteger(Number.parseInt(b.progress_chapter_id, 10));
+    const progressPosition = Math.max(0, Number.parseInt(b.progress_position, 10) || 0);
+    const actionLabel = hasProgress ? 'Continue' : 'Read';
+    const progressMeta = hasProgress
+      ? `<div class="book-progress-hint">Continue from ${esc(b.progress_chapter_title || 'saved position')} &middot; seg ${progressPosition + 1}</div>`
+      : '';
 
     return `
     <div class="book-card" data-id="${b.id}">
@@ -31,9 +37,10 @@ async function loadBooks() {
         <div class="book-author" style="margin-top:3px;font-size:.68rem">
           ${b.total_chapters} section${b.total_chapters !== 1 ? 's' : ''}
         </div>
+        ${progressMeta}
       </div>
       <div class="book-actions">
-        <a href="/reader/${b.id}">Read</a>
+        <a href="/reader/${b.id}">${actionLabel}</a>
         <button class="del-btn" onclick="deleteBook(event,${b.id})">Remove</button>
       </div>
     </div>`;

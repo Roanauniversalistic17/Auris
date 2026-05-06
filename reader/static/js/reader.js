@@ -11,8 +11,77 @@ let fontSize        = parseInt(localStorage.getItem('fontSize') || '18');
 let fontFamily      = localStorage.getItem('fontFamily') || 'serif';
 let lineHeight      = parseFloat(localStorage.getItem('lineHeight') || '1.9');
 let currentTheme    = localStorage.getItem('theme') || 'night';
+let _progressSaveTimer = null;
+let _scrollProgressTimer = null;
+let _lastSavedProgressKey = '';
+let _ignoreScrollTrackingUntil = 0;
 
 const audio = document.getElementById('tts-audio');
+
+function clampSegmentIndex(idx, segList = segments) {
+  const parsed = Number.parseInt(idx, 10);
+  const safe = Number.isFinite(parsed) ? parsed : 0;
+  const max = Math.max((segList?.length || 1) - 1, 0);
+  return Math.max(0, Math.min(safe, max));
+}
+
+function progressKey(chapterId, position) {
+  return `${chapterId}:${position}`;
+}
+
+function sendProgress(chapterId, position, options = {}) {
+  const { useBeacon = false, force = false } = options;
+  if (!chapterId) return;
+
+  const clamped = clampSegmentIndex(position);
+  const key = progressKey(chapterId, clamped);
+  if (!force && key === _lastSavedProgressKey) return;
+  _lastSavedProgressKey = key;
+
+  const payload = JSON.stringify({ chapter_id: chapterId, position: clamped });
+  const url = `/api/books/${BOOK_ID}/progress`;
+
+  if (useBeacon && navigator.sendBeacon) {
+    const ok = navigator.sendBeacon(url, new Blob([payload], { type: 'application/json' }));
+    if (ok) return;
+  }
+
+  fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: payload,
+    keepalive: useBeacon,
+  }).catch(() => {});
+}
+
+function queueProgressSave(chapterId = currentChapterId, position = currentSegIdx) {
+  if (!chapterId) return;
+  clearTimeout(_progressSaveTimer);
+  _progressSaveTimer = setTimeout(() => {
+    sendProgress(chapterId, position);
+  }, 250);
+}
+
+function flushProgressSave(options = {}) {
+  clearTimeout(_progressSaveTimer);
+  if (currentChapterId) {
+    sendProgress(currentChapterId, currentSegIdx, options);
+  }
+}
+
+function setCurrentSegment(idx, options = {}) {
+  const { highlight = false, behavior = 'smooth', save = true } = options;
+  currentSegIdx = clampSegmentIndex(idx);
+  if (highlight) {
+    highlightSegment(currentSegIdx, { behavior });
+  }
+  updatePlaybackUI();
+  updateProgress();
+  if (save) {
+    queueProgressSave(currentChapterId, currentSegIdx);
+  }
+  return currentSegIdx;
+}
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
 
@@ -86,13 +155,38 @@ async function loadTOC() {
   }).join('');
 
   const prog = await fetch(`/api/books/${BOOK_ID}/progress`).then(r => r.json());
-  if (prog.chapter_id) openChapter(prog.chapter_id);
-  else if (chapters.length) openChapter(chapters[0].id);
+  const savedChapterId = Number.parseInt(prog.chapter_id, 10);
+  const savedPosition = Number.parseInt(prog.position, 10);
+  const hasSavedChapter = chapters.some(ch => ch.id === savedChapterId);
+  if (hasSavedChapter) {
+    openChapter(savedChapterId, {
+      resumePosition: savedPosition,
+      persistOpened: false,
+      highlightOnLoad: true,
+    });
+  } else if (chapters.length) {
+    openChapter(chapters[0].id, {
+      resumePosition: 0,
+      persistOpened: false,
+      highlightOnLoad: false,
+    });
+  }
 
   loadBookmarks();
 }
 
-async function openChapter(chapterId) {
+async function openChapter(chapterId, options = {}) {
+  const {
+    resumePosition = 0,
+    persistCurrent = true,
+    persistOpened = true,
+    highlightOnLoad = false,
+  } = options;
+
+  if (persistCurrent && currentChapterId && currentChapterId !== chapterId) {
+    sendProgress(currentChapterId, currentSegIdx, { force: true });
+  }
+
   stopPlayback();
   currentChapterId = chapterId;
   currentSegIdx    = 0;
@@ -111,9 +205,13 @@ async function openChapter(chapterId) {
 
   segments = await fetch(`/api/tts/segments/${BOOK_ID}/${chapterId}`).then(r => r.json());
   renderContent(segments);
-  updatePlaybackUI();
-  updateProgress();
-  saveProgress(chapterId, 0);
+
+  const startIdx = clampSegmentIndex(resumePosition);
+  setCurrentSegment(startIdx, {
+    highlight: highlightOnLoad,
+    behavior: 'auto',
+    save: persistOpened,
+  });
 }
 
 // ── Content rendering ─────────────────────────────────────────────────────────
@@ -147,9 +245,8 @@ function renderContent(segs) {
 }
 
 function jumpTo(idx) {
-  currentSegIdx = idx;
   if (isPlaying) playSegment(idx);
-  else { highlightSegment(idx); updateProgress(); }
+  else { setCurrentSegment(idx, { highlight: true, save: true }); }
 }
 
 // ── Playback ──────────────────────────────────────────────────────────────────
@@ -158,10 +255,7 @@ async function playSegment(idx) {
   if (idx >= segments.length) { stopPlayback(); return; }
 
   isPlaying      = true;
-  currentSegIdx  = idx;
-  highlightSegment(idx);
-  updatePlaybackUI();
-  updateProgress();
+  setCurrentSegment(idx, { highlight: true, save: true });
 
   const seg = segments[idx];
   const charEl = document.getElementById('pb-character');
@@ -211,7 +305,10 @@ audio.addEventListener('ended', () => {
   if (!isPlaying) return;
   const next = currentSegIdx + 1;
   if (next < segments.length) playSegment(next);
-  else stopPlayback();
+  else {
+    queueProgressSave(currentChapterId, currentSegIdx);
+    stopPlayback();
+  }
 });
 
 function stopPlayback() {
@@ -219,6 +316,7 @@ function stopPlayback() {
   stopWordHighlight();
   audio.pause();
   audio.src = '';
+  if (currentChapterId) queueProgressSave(currentChapterId, currentSegIdx);
   const btn = document.getElementById('btn-play');
   btn.innerHTML = '&#9654;';
   btn.classList.add('paused');
@@ -257,13 +355,15 @@ function stopWordHighlight() {
 
 // ── Segment highlighting & auto-scroll ────────────────────────────────────────
 
-function highlightSegment(idx) {
+function highlightSegment(idx, options = {}) {
+  const behavior = options.behavior || 'smooth';
+  _ignoreScrollTrackingUntil = Date.now() + (behavior === 'smooth' ? 700 : 150);
   document.querySelectorAll('.sentence').forEach((el, i) => {
     el.classList.toggle('playing', i === idx);
     el.classList.toggle('spoken',  i < idx);
   });
   const active = document.querySelector(`.sentence[data-idx="${idx}"]`);
-  if (active) active.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (active) active.scrollIntoView({ behavior, block: 'center' });
 }
 
 // ── Progress bar ──────────────────────────────────────────────────────────────
@@ -298,6 +398,7 @@ document.getElementById('btn-play').onclick = () => {
     stopWordHighlight();
     audio.pause();
     updatePlaybackUI();
+    queueProgressSave(currentChapterId, currentSegIdx);
   } else {
     playSegment(currentSegIdx);
   }
@@ -308,13 +409,13 @@ document.getElementById('btn-stop').onclick  = stopPlayback;
 document.getElementById('btn-next-seg').onclick = () => {
   const next = Math.min(currentSegIdx + 1, segments.length - 1);
   if (isPlaying) playSegment(next);
-  else { currentSegIdx = next; highlightSegment(next); updatePlaybackUI(); updateProgress(); }
+  else { setCurrentSegment(next, { highlight: true, save: true }); }
 };
 
 document.getElementById('btn-prev-seg').onclick = () => {
   const prev = Math.max(currentSegIdx - 1, 0);
   if (isPlaying) playSegment(prev);
-  else { currentSegIdx = prev; highlightSegment(prev); updatePlaybackUI(); updateProgress(); }
+  else { setCurrentSegment(prev, { highlight: true, save: true }); }
 };
 
 document.getElementById('speed-slider').oninput = function() {
@@ -335,12 +436,38 @@ function toggleBookmarkPanel() {
 
 // ── Progress persistence ──────────────────────────────────────────────────────
 
-function saveProgress(chapterId, position) {
-  fetch(`/api/books/${BOOK_ID}/progress`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ chapter_id: chapterId, position }),
-  }).catch(() => {});
+function updateProgressFromViewport() {
+  if (!segments.length || isPlaying || Date.now() < _ignoreScrollTrackingUntil) return;
+
+  const sentenceEls = document.querySelectorAll('.sentence');
+  if (!sentenceEls.length) return;
+
+  const viewportCenter = window.innerHeight * 0.35;
+  let bestIdx = currentSegIdx;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  sentenceEls.forEach((el, idx) => {
+    const rect = el.getBoundingClientRect();
+    const mid = rect.top + (rect.height / 2);
+    const distance = Math.abs(mid - viewportCenter);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIdx = idx;
+    }
+  });
+
+  if (bestIdx !== currentSegIdx) {
+    currentSegIdx = bestIdx;
+    updatePlaybackUI();
+    updateProgress();
+    queueProgressSave(currentChapterId, currentSegIdx);
+  }
+}
+
+function scheduleViewportProgressUpdate() {
+  if (!segments.length || isPlaying || Date.now() < _ignoreScrollTrackingUntil) return;
+  clearTimeout(_scrollProgressTimer);
+  _scrollProgressTimer = setTimeout(updateProgressFromViewport, 120);
 }
 
 // ── Bookmarks ─────────────────────────────────────────────────────────────────
@@ -396,10 +523,11 @@ async function removeBookmark(e, id) {
 
 function gotoBookmark(chapterId, segIdx) {
   if (chapterId !== currentChapterId) {
-    openChapter(chapterId).then(() => {
-      currentSegIdx = segIdx;
-      highlightSegment(segIdx);
-      updateProgress();
+    openChapter(chapterId, {
+      resumePosition: segIdx,
+      persistCurrent: true,
+      persistOpened: true,
+      highlightOnLoad: true,
     });
   } else {
     jumpTo(segIdx);
@@ -507,5 +635,14 @@ function esc(s) {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+
+window.addEventListener('scroll', scheduleViewportProgressUpdate, { passive: true });
+window.addEventListener('pagehide', () => flushProgressSave({ useBeacon: true, force: true }));
+window.addEventListener('beforeunload', () => flushProgressSave({ useBeacon: true, force: true }));
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    flushProgressSave({ useBeacon: true, force: true });
+  }
+});
 
 loadTOC();

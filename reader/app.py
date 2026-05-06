@@ -216,8 +216,13 @@ def _detect_characters(book_id: int, data: dict):
 def list_books():
     with get_conn() as conn:
         rows = conn.execute(
-            'SELECT id, title, author, file_type, cover_b64, added_at, last_read, total_chapters '
-            'FROM books ORDER BY added_at DESC'
+            'SELECT b.id, b.title, b.author, b.file_type, b.cover_b64, b.added_at, '
+            'b.last_read, b.total_chapters, rp.chapter_id AS progress_chapter_id, '
+            'rp.position AS progress_position, c.title AS progress_chapter_title '
+            'FROM books b '
+            'LEFT JOIN reading_progress rp ON rp.book_id = b.id '
+            'LEFT JOIN chapters c ON c.id = rp.chapter_id '
+            'ORDER BY COALESCE(b.last_read, b.added_at) DESC, b.added_at DESC'
         ).fetchall()
     books = []
     for r in rows:
