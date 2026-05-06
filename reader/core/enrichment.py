@@ -30,36 +30,98 @@ _SECTION_HEADING_RE = re.compile(
 _SHORT_ALL_CAPS_RE = re.compile(r"^[A-Z0-9][A-Z0-9 '&,:;.-]{1,80}$")
 _QUESTION_RE = re.compile(r'\?\s*["\u201d]?\s*$')
 _SURPRISE_RE = re.compile(r'!\s*["\u201d]?\s*$')
+_SHOCKED_QUESTION_END_RE = re.compile(r'\?!\s*["\u201d]?\s*$')
 
+# \u2500\u2500 Question context refiners \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 _QUESTION_HINT_RE = re.compile(
-    r"\b(asked|wondered|queried|questioned|inquired)\b",
+    r"\b(asked|wondered|queried|questioned|inquired|demanded|challenged)\b",
     re.IGNORECASE,
 )
+# Skeptical / rhetorical: raised eyebrow, disbelief, sarcasm
+_SKEPTIC_CONTEXT_RE = re.compile(
+    r"\b(scoff|scoffed|sneer|sneered|skeptic|sarcast|disdain|"
+    r"smirk|smirked|raised.*eyebrow|narrowed.*eyes|rolled.*eyes|"
+    r"doubt|doubted|disbelief|incredulous|dismissive)\b",
+    re.IGNORECASE,
+)
+# Shocked / disbelieving questions
+_SHOCK_CONTEXT_RE = re.compile(
+    r"\b(shock|shocked|horrified|frozen|stunned|stagger|recoil|"
+    r"jaw dropped|speechless|aghast|pale|couldn't believe|"
+    r"taken aback|dumbstruck|wide.eyed)\b",
+    re.IGNORECASE,
+)
+# Wondering / curious questions
+_WONDER_CONTEXT_RE = re.compile(
+    r"\b(wonder|curious|pondered|puzzle|puzzled|contemplat|mused|"
+    r"tilted.*head|furrowed.*brow|peered|squinted|speculated|mulled)\b",
+    re.IGNORECASE,
+)
+
+# \u2500\u2500 Surprise context refiners \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 _SURPRISE_HINT_RE = re.compile(
     r"\b(gasp|gasped|gasping|exclaim|exclaimed|cried out|startled|shouted|yelled|"
-    r"yelped|screamed)\b",
+    r"yelped|screamed|shrieked|recoiled|flinched|jumped back)\b",
     re.IGNORECASE,
 )
-_LAUGHTER_RE = re.compile(r"\b(laugh|laughs|laughed|laughing|chuckl|giggl)\b", re.IGNORECASE)
-_SIGH_RE = re.compile(r"\b(sigh|sighs|sighed|sighing|exhale|exhaled)\b", re.IGNORECASE)
+# Strong shock \u2014 jaw-dropping, screaming, impossible
+_STRONG_SURPRISE_RE = re.compile(
+    r"\b(gasp|gasped|shriek|shrieked|scream|screamed|"
+    r"jaw dropped|impossible|unbelievable|recoil|recoiled|"
+    r"stunned|flinch|flinched|couldn't believe|speechless|aghast|"
+    r"mind went blank|froze in place|blood ran cold)\b",
+    re.IGNORECASE,
+)
+# Excited / triumphant surprise
+_EXCITED_SURPRISE_RE = re.compile(
+    r"\b(finally|at last|triumph|triumphant|victory|succeed|succeeded|"
+    r"incredible|amazing|wonderful|brilliant|breakthrough|"
+    r"beamed|cheered|lit up|leaped for joy|eyes shone)\b",
+    re.IGNORECASE,
+)
+# Mild realization / dawning understanding
+_MILD_REALIZATION_RE = re.compile(
+    r"\b(realiz|reali[sz]ed|dawned|suddenly understood|remembered|"
+    r"occurred to|it hit|clicked|made sense|recognition|it struck)\b",
+    re.IGNORECASE,
+)
+
+# \u2500\u2500 Emotion word patterns \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+_LAUGHTER_RE = re.compile(
+    r"\b(laugh|laughs|laughed|laughing|chuckl|giggl|"
+    r"grinned|grinning|amused|teased|joked|snickered|cackled|"
+    r"burst out laughing|couldn't help laughing)\b",
+    re.IGNORECASE,
+)
+_SIGH_RE = re.compile(
+    r"\b(sigh|sighs|sighed|sighing|exhale|exhaled|"
+    r"breathed out|let out a (?:long |weary |heavy |deep )?breath|"
+    r"heaved a sigh|resigned(?:ly)?)\b",
+    re.IGNORECASE,
+)
 _DISSATISFACTION_RE = re.compile(
-    r"\b(grumbl|mutter|growl|snapp|barked|hiss|scowl|gritted)\b",
+    r"\b(grumbl|mutter|growl|snapp|barked|hiss|scowl|gritted|"
+    r"glared|glaring|frowned|frowning|stormed|huffed|fumed|"
+    r"seethed|snarled|glowered|bristled|sneered at|"
+    r"slammed|threw.*down|shook.*head in disgust)\b",
     re.IGNORECASE,
 )
 _CONFIRMATION_RE = re.compile(
-    r"\b(nod|nodded|agreed|confirm|confirmed|affirm|affirmed|yes|indeed)\b",
+    r"\b(nod|nodded|nodding|agreed|confirm|confirmed|affirm|affirmed|assented|"
+    r"concurred|gave a nod|tilted his head in agreement|tilted her head in agreement)\b",
     re.IGNORECASE,
 )
 _WHISPER_RE = re.compile(
-    r"\b(whisper|whispered|breathed|murmured|under his breath|under her breath)\b",
+    r"\b(whisper|whispered|breathed|murmured|under his breath|under her breath|"
+    r"barely audible|in a low voice|hissed softly)\b",
     re.IGNORECASE,
 )
 
 _TAG_RULES = [
-    (_LAUGHTER_RE, "[laughter]"),
-    (_SIGH_RE, "[sigh]"),
-    (_DISSATISFACTION_RE, "[dissatisfaction-hnn]"),
-    (_CONFIRMATION_RE, "[confirmation-en]"),
+    (_LAUGHTER_RE,       "[laughter]"),
+    (_SIGH_RE,           "[sigh]"),
+    (_DISSATISFACTION_RE,"[dissatisfaction-hnn]"),
+    (_CONFIRMATION_RE,   "[confirmation-en]"),
 ]
 _ATTRIBUTION_VERBS = (
     "said|replied|asked|whispered|shouted|cried|muttered|exclaimed|called|added|"
@@ -297,16 +359,38 @@ def _find_speaker(sentence: str, dialogue_map: dict, last_speaker: str | None) -
 
 
 def _select_expression_tag(sentence: str, context: str) -> str | None:
-    if _QUESTION_RE.search(sentence) or _QUESTION_HINT_RE.search(context):
-        return "[question-en]"
+    is_question   = bool(_QUESTION_RE.search(sentence))
+    is_exclamation = bool(_SURPRISE_RE.search(sentence))
+
+    # Questions (punctuation beats context for ordering; context picks the flavour)
+    if is_question or _QUESTION_HINT_RE.search(context):
+        if _SKEPTIC_CONTEXT_RE.search(context):
+            return "[question-ei]"         # sceptical / rhetorical
+        if _SHOCK_CONTEXT_RE.search(context) or _SHOCKED_QUESTION_END_RE.search(sentence):
+            return "[question-oh]"         # shocked / disbelieving
+        if _WONDER_CONTEXT_RE.search(context):
+            return "[question-ah]"         # curious / wondering
+        return "[question-en]"             # plain question
+
+    # Explicit emotion attribution (laughed, sighed, grumbled, nodded …)
     for pattern, tag in _TAG_RULES:
         if pattern.search(context):
             return tag
-    if _SURPRISE_HINT_RE.search(context) or (
-        _SURPRISE_RE.search(sentence)
-        and re.search(r"\b(oh|ah|what|look|no|watch out|help)\b", context, re.IGNORECASE)
-    ):
-        return "[surprise-oh]"
+
+    # Quiet realizations don't need an exclamation mark to warrant a tag
+    if _MILD_REALIZATION_RE.search(context):
+        return "[surprise-ah]"
+
+    # Surprise / exclamation — differentiated by intensity
+    if is_exclamation or _SURPRISE_HINT_RE.search(context):
+        if _STRONG_SURPRISE_RE.search(context):
+            return "[surprise-wa]"         # jaw-drop / scream shock
+        if _EXCITED_SURPRISE_RE.search(context):
+            return "[surprise-yo]"         # triumphant / elated
+        if _MILD_REALIZATION_RE.search(context):
+            return "[surprise-ah]"         # gentle dawning realization
+        return "[surprise-oh]"             # default surprise
+
     return None
 
 
@@ -331,8 +415,14 @@ def _segment_speed(sentence: str, is_dialogue: bool, scene_speed: float, tag: st
 
     if is_whisper or tag == "[sigh]":
         speed = min(speed, 0.94)
-    elif tag in {"[surprise-oh]", "[laughter]"} and is_dialogue:
-        speed = max(speed, 1.03)
+    elif tag == "[dissatisfaction-hnn]":
+        speed = min(speed, 0.97)          # muttering is deliberate and slow
+    elif tag == "[question-oh]":
+        speed = min(speed, 0.96)          # shocked questions land harder when slower
+    elif tag in {"[surprise-wa]", "[laughter]"} and is_dialogue:
+        speed = max(speed, 1.03)          # shock and laughter burst out faster
+    elif tag == "[surprise-yo]":
+        speed = max(speed, 1.05)          # excited triumph is animated
 
     if "..." in sentence or " -- " in sentence or ";" in sentence or ":" in sentence:
         speed = min(speed, 0.98)
@@ -357,6 +447,7 @@ def enrich_chapter(
 
     segments = []
     last_speaker = None
+    prev_sentence = ""
 
     for sentence in sentences:
         sentence = sentence.strip()
@@ -389,8 +480,12 @@ def enrich_chapter(
             if "whisper" not in base:
                 instruct = base + ", whisper"
 
-        enriched, tag = _inject_tags(sentence, sentence)
+        # Include the previous sentence as context so cross-sentence attribution
+        # (e.g. "She gasped." … "'Impossible!'" ) is picked up correctly.
+        context = f"{prev_sentence} {sentence}".strip() if prev_sentence else sentence
+        enriched, tag = _inject_tags(sentence, context)
         speed = _segment_speed(sentence, is_dialogue, scene_speed, tag, is_whisper)
+        prev_sentence = sentence
 
         segments.append(
             {

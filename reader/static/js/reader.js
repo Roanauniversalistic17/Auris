@@ -220,6 +220,8 @@ async function openChapter(chapterId, options = {}) {
   segments = await fetch(`/api/tts/segments/${BOOK_ID}/${chapterId}`).then(r => r.json());
   renderContent(segments);
 
+  document.getElementById('chapter-content').scrollTop = 0;
+
   const startIdx = clampSegmentIndex(resumePosition);
   setCurrentSegment(startIdx, {
     highlight: highlightOnLoad,
