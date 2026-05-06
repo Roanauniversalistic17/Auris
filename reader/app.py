@@ -667,6 +667,39 @@ def serve_audio(cache_key):
 # Export API
 # ════════════════════════════════════════════════════════════════════════════
 
+def _ensure_audio_for_chapter(book_id: int, chapter_id: int, segs: list[dict]):
+    """Generate TTS for any segment in segs that has no audio yet, updating DB and segs in-place."""
+    with get_conn() as conn:
+        chars = {
+            r['name']: dict(r)
+            for r in conn.execute(
+                'SELECT * FROM characters WHERE book_id=?', (book_id,)
+            ).fetchall()
+        }
+    for seg in segs:
+        if seg.get('audio_path') and os.path.exists(seg['audio_path']):
+            continue
+        char = chars.get(seg['character_name']) if seg['character_name'] else None
+        ref_audio = char['ref_audio_path'] if char and char.get('ref_audio_path') else None
+        try:
+            result = tts.generate(
+                text=seg['enriched_text'],
+                instruct=seg['instruct'],
+                ref_audio=ref_audio,
+                speed=seg['speed'],
+            )
+            with get_conn() as conn:
+                conn.execute(
+                    'UPDATE tts_segments SET audio_path=?, duration_sec=?, cache_key=? WHERE id=?',
+                    (result['audio_path'], result['duration_sec'], result['cache_key'], seg['id'])
+                )
+            seg['audio_path'] = result['audio_path']
+            seg['duration_sec'] = result['duration_sec']
+            seg['cache_key'] = result['cache_key']
+        except Exception as e:
+            log.warning('Audio generation failed for segment %s: %s', seg.get('id'), e)
+
+
 def _get_char_colors(book_id):
     with get_conn() as conn:
         rows = conn.execute(
@@ -697,6 +730,9 @@ def export_chapter(book_id, chapter_id):
     audio_fmt = body.get('audio_fmt', 'wav')
     sub_fmt = body.get('sub_fmt', 'ass')
 
+    if tts.status()['state'] != 'ready':
+        return jsonify({'error': 'TTS model not ready'}), 503
+
     with get_conn() as conn:
         ch = conn.execute('SELECT * FROM chapters WHERE id=? AND book_id=?',
                           (chapter_id, book_id)).fetchone()
@@ -705,6 +741,7 @@ def export_chapter(book_id, chapter_id):
         return jsonify({'error': 'Chapter not found'}), 404
 
     segs = _get_chapter_segments(chapter_id, book_id)
+    _ensure_audio_for_chapter(book_id, chapter_id, segs)
     colors = _get_char_colors(book_id)
     result = exporter.export_single_chapter(
         ch['title'], book['title'], segs, colors, audio_fmt, sub_fmt
@@ -723,6 +760,9 @@ def export_full(book_id):
     audio_fmt = body.get('audio_fmt', 'wav')
     sub_fmt = body.get('sub_fmt', 'ass')
 
+    if tts.status()['state'] != 'ready':
+        return jsonify({'error': 'TTS model not ready'}), 503
+
     with get_conn() as conn:
         book = conn.execute('SELECT * FROM books WHERE id=?', (book_id,)).fetchone()
         chapters = conn.execute(
@@ -731,7 +771,9 @@ def export_full(book_id):
 
     all_segs = []
     for ch in chapters:
-        all_segs.extend(_get_chapter_segments(ch['id'], book_id))
+        segs = _get_chapter_segments(ch['id'], book_id)
+        _ensure_audio_for_chapter(book_id, ch['id'], segs)
+        all_segs.extend(segs)
 
     colors = _get_char_colors(book_id)
     result = exporter.export_full_book(book['title'], all_segs, colors, audio_fmt, sub_fmt)
@@ -749,6 +791,9 @@ def export_chapterwise(book_id):
     audio_fmt = body.get('audio_fmt', 'wav')
     sub_fmt = body.get('sub_fmt', 'ass')
 
+    if tts.status()['state'] != 'ready':
+        return jsonify({'error': 'TTS model not ready'}), 503
+
     with get_conn() as conn:
         book = conn.execute('SELECT * FROM books WHERE id=?', (book_id,)).fetchone()
         chapters = conn.execute(
@@ -758,6 +803,7 @@ def export_chapterwise(book_id):
     chapters_data = []
     for ch in chapters:
         segs = _get_chapter_segments(ch['id'], book_id)
+        _ensure_audio_for_chapter(book_id, ch['id'], segs)
         if segs:
             chapters_data.append({'chapter_title': ch['title'], 'segments': segs})
 
