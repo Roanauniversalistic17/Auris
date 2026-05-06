@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Voice Studio — {{ book.title }}{% endblock %}
+{% block content %}
+<div class="studio-page">
+  <div class="studio-header">
+    <a href="/reader/{{ book.id }}" class="btn btn-sm btn-ghost">&#8592; Reader</a>
+    <h1>Voice Studio &mdash; <em>{{ book.title }}</em></h1>
+  </div>
+
+  <div class="studio-narrator">
+    <div class="studio-section-title">Narrator</div>
+    <div class="char-list">
+      <div class="character-card narrator-card">
+        <div class="char-avatar narrator-avatar">N</div>
+        <div class="char-details">
+          <span class="char-name">Narrator</span>
+          <div class="voice-controls">
+            <select id="narrator-gender" class="vc-select">
+              <option value="female" selected>Female</option>
+              <option value="male">Male</option>
+            </select>
+            <select id="narrator-age" class="vc-select">
+              <option value="child">Child</option>
+              <option value="teenager">Teenager</option>
+              <option value="young adult">Young adult</option>
+              <option value="middle-aged" selected>Middle-aged</option>
+              <option value="elderly">Elderly</option>
+            </select>
+            <select id="narrator-pitch" class="vc-select">
+              <option value="very low pitch">Very low pitch</option>
+              <option value="low pitch">Low pitch</option>
+              <option value="moderate pitch" selected>Moderate pitch</option>
+              <option value="high pitch">High pitch</option>
+              <option value="very high pitch">Very high pitch</option>
+            </select>
+            <select id="narrator-accent" class="vc-select">
+              <option value="american accent" selected>American</option>
+              <option value="british accent">British</option>
+              <option value="australian accent">Australian</option>
+              <option value="canadian accent">Canadian</option>
+              <option value="indian accent">Indian</option>
+              <option value="chinese accent">Chinese</option>
+              <option value="korean accent">Korean</option>
+              <option value="japanese accent">Japanese</option>
+            </select>
+          </div>
+          <div class="char-card-footer">
+            <span class="instruct-preview" id="narrator-instruct-preview"></span>
+            <button class="btn btn-sm btn-ghost preview-btn" data-char-id="narrator">&#9654; Preview</button>
+            <button class="btn btn-sm btn-primary" onclick="saveNarrator()">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="studio-characters">
+    <div class="studio-section-title">
+      Characters <span id="char-count" class="muted"></span>
+    </div>
+    <div id="char-list" class="char-list">
+      <div class="loading-spinner">Detecting characters…</div>
+    </div>
+  </div>
+</div>
+
+<audio id="preview-audio" style="display:none"></audio>
+{% endblock %}
+{% block scripts %}
+<script>window.BOOK_ID = {{ book.id }};</script>
+<script>window.NARRATOR_INSTRUCT = {{ book.narrator_instruct|tojson }};</script>
+<script src="/static/js/voice_studio.js"></script>
+{% endblock %}

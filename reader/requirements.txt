@@ -1,0 +1,14 @@
+# OmniReader — additional dependencies (on top of OmniVoice's own deps)
+# Install with: pip install -r requirements.txt
+# Works on Windows, Linux, and macOS.
+
+flask>=3.0
+ebooklib>=0.18
+pymupdf>=1.24          # PyMuPDF — imported as: import fitz
+soundfile>=0.12
+pydub>=0.25            # MP3 export (also needs ffmpeg installed on PATH)
+spacy>=3.7             # Required for character detection
+
+# After installing, download the English model (requires internet once):
+#   python -m spacy download en_core_web_sm
+# OR use the Settings page in the app to install it with one click.
