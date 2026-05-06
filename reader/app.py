@@ -6,6 +6,7 @@ import base64
 import logging
 import os
 import threading
+import uuid
 
 from flask import (
     Flask, jsonify, render_template, request,
@@ -31,6 +32,8 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 tts = TTSEngine()
 
 DEFAULT_NARRATOR_INSTRUCT = app_settings.DEFAULT_NARRATOR_INSTRUCT
+
+_export_jobs: dict = {}
 VOICE_PREVIEW_TEXT = (
     'Hello. This is a voice preview sample. The afternoon is calm, the room is quiet, '
     'and every word should sound clear, steady, and natural.'
@@ -667,7 +670,7 @@ def serve_audio(cache_key):
 # Export API
 # ════════════════════════════════════════════════════════════════════════════
 
-def _ensure_audio_for_chapter(book_id: int, chapter_id: int, segs: list[dict]):
+def _ensure_audio_for_chapter(book_id: int, chapter_id: int, segs: list[dict], job: dict | None = None):
     """Generate TTS for any segment in segs that has no audio yet, updating DB and segs in-place."""
     with get_conn() as conn:
         chars = {
@@ -678,6 +681,8 @@ def _ensure_audio_for_chapter(book_id: int, chapter_id: int, segs: list[dict]):
         }
     for seg in segs:
         if seg.get('audio_path') and os.path.exists(seg['audio_path']):
+            if job is not None:
+                job['done'] = job.get('done', 0) + 1
             continue
         char = chars.get(seg['character_name']) if seg['character_name'] else None
         ref_audio = char['ref_audio_path'] if char and char.get('ref_audio_path') else None
@@ -698,6 +703,8 @@ def _ensure_audio_for_chapter(book_id: int, chapter_id: int, segs: list[dict]):
             seg['cache_key'] = result['cache_key']
         except Exception as e:
             log.warning('Audio generation failed for segment %s: %s', seg.get('id'), e)
+        if job is not None:
+            job['done'] = job.get('done', 0) + 1
 
 
 def _get_char_colors(book_id):
@@ -724,92 +731,185 @@ def _get_chapter_segments(chapter_id, book_id):
     return [dict(r) for r in rows]
 
 
+def _make_export_job() -> tuple[str, dict]:
+    job_id = str(uuid.uuid4())
+    job: dict = {'state': 'pending', 'message': 'Starting...', 'done': 0, 'total': 0, 'result': None, 'error': None}
+    _export_jobs[job_id] = job
+    return job_id, job
+
+
+def _run_chapter_export(job_id: str, book_id: int, chapter_id: int, audio_fmt: str, sub_fmt: str):
+    job = _export_jobs[job_id]
+    try:
+        job['state'] = 'running'
+        job['message'] = 'Loading segments...'
+        with get_conn() as conn:
+            ch = conn.execute('SELECT * FROM chapters WHERE id=? AND book_id=?',
+                              (chapter_id, book_id)).fetchone()
+            book = conn.execute('SELECT title FROM books WHERE id=?', (book_id,)).fetchone()
+        if not ch:
+            job['state'] = 'failed'
+            job['error'] = 'Chapter not found'
+            return
+        segs = _get_chapter_segments(chapter_id, book_id)
+        job['total'] = len(segs)
+        job['done'] = 0
+        job['message'] = f'Generating audio ({len(segs)} segments)...'
+        _ensure_audio_for_chapter(book_id, chapter_id, segs, job)
+        job['message'] = 'Merging audio...'
+        colors = _get_char_colors(book_id)
+        result = exporter.export_single_chapter(ch['title'], book['title'], segs, colors, audio_fmt, sub_fmt)
+        job['state'] = 'complete'
+        job['message'] = 'Done'
+        job['result'] = {
+            'audio_download': f'/api/export/download?path={result["audio_path"]}',
+            'subtitle_download': f'/api/export/download?path={result["subtitle_path"]}',
+        }
+    except Exception as e:
+        log.exception('Export job %s failed', job_id)
+        job['state'] = 'failed'
+        job['error'] = str(e)
+
+
+def _run_full_export(job_id: str, book_id: int, audio_fmt: str, sub_fmt: str):
+    job = _export_jobs[job_id]
+    try:
+        job['state'] = 'running'
+        job['message'] = 'Loading chapters...'
+        with get_conn() as conn:
+            book = conn.execute('SELECT * FROM books WHERE id=?', (book_id,)).fetchone()
+            chapters = conn.execute(
+                'SELECT id FROM chapters WHERE book_id=? ORDER BY order_num', (book_id,)
+            ).fetchall()
+        chapters_segs: list[tuple[int, list[dict]]] = []
+        for ch in chapters:
+            segs = _get_chapter_segments(ch['id'], book_id)
+            chapters_segs.append((ch['id'], segs))
+        total = sum(len(s) for _, s in chapters_segs)
+        job['total'] = total
+        job['done'] = 0
+        job['message'] = f'Generating audio ({total} segments)...'
+        for ch_id, segs in chapters_segs:
+            _ensure_audio_for_chapter(book_id, ch_id, segs, job)
+        job['message'] = 'Merging audio...'
+        all_segs = [s for _, segs in chapters_segs for s in segs]
+        colors = _get_char_colors(book_id)
+        result = exporter.export_full_book(book['title'], all_segs, colors, audio_fmt, sub_fmt)
+        job['state'] = 'complete'
+        job['message'] = 'Done'
+        job['result'] = {
+            'audio_download': f'/api/export/download?path={result["audio_path"]}',
+            'subtitle_download': f'/api/export/download?path={result["subtitle_path"]}',
+        }
+    except Exception as e:
+        log.exception('Export job %s failed', job_id)
+        job['state'] = 'failed'
+        job['error'] = str(e)
+
+
+def _run_chapterwise_export(job_id: str, book_id: int, audio_fmt: str, sub_fmt: str):
+    job = _export_jobs[job_id]
+    try:
+        job['state'] = 'running'
+        job['message'] = 'Loading chapters...'
+        with get_conn() as conn:
+            book = conn.execute('SELECT * FROM books WHERE id=?', (book_id,)).fetchone()
+            chapters = conn.execute(
+                'SELECT id, title FROM chapters WHERE book_id=? ORDER BY order_num', (book_id,)
+            ).fetchall()
+        chapters_data: list[dict] = []
+        for ch in chapters:
+            segs = _get_chapter_segments(ch['id'], book_id)
+            chapters_data.append({'chapter_title': ch['title'], 'ch_id': ch['id'], 'segments': segs})
+        total = sum(len(c['segments']) for c in chapters_data)
+        job['total'] = total
+        job['done'] = 0
+        job['message'] = f'Generating audio ({total} segments)...'
+        for ch_data in chapters_data:
+            _ensure_audio_for_chapter(book_id, ch_data['ch_id'], ch_data['segments'], job)
+        job['message'] = 'Packaging ZIP...'
+        colors = _get_char_colors(book_id)
+        zip_path = exporter.export_chapter_zip(
+            book['title'],
+            [{'chapter_title': c['chapter_title'], 'segments': c['segments']} for c in chapters_data if c['segments']],
+            colors, audio_fmt, sub_fmt,
+        )
+        job['state'] = 'complete'
+        job['message'] = 'Done'
+        job['result'] = {'zip_download': f'/api/export/download?path={zip_path}'}
+    except Exception as e:
+        log.exception('Export job %s failed', job_id)
+        job['state'] = 'failed'
+        job['error'] = str(e)
+
+
+def _resolve_sub_fmt(book_id: int, requested: str) -> str:
+    book = _load_book(book_id)
+    if book and _book_single_narrator_mode(dict(book)):
+        return 'srt'
+    return requested
+
+
 @app.route('/api/books/<int:book_id>/export/chapter/<int:chapter_id>', methods=['POST'])
 def export_chapter(book_id, chapter_id):
     body = request.get_json(force=True) or {}
     audio_fmt = body.get('audio_fmt', 'wav')
-    sub_fmt = body.get('sub_fmt', 'ass')
+    sub_fmt = _resolve_sub_fmt(book_id, body.get('sub_fmt', 'srt'))
 
     if tts.status()['state'] != 'ready':
         return jsonify({'error': 'TTS model not ready'}), 503
 
-    with get_conn() as conn:
-        ch = conn.execute('SELECT * FROM chapters WHERE id=? AND book_id=?',
-                          (chapter_id, book_id)).fetchone()
-        book = conn.execute('SELECT title FROM books WHERE id=?', (book_id,)).fetchone()
-    if not ch:
-        return jsonify({'error': 'Chapter not found'}), 404
-
-    segs = _get_chapter_segments(chapter_id, book_id)
-    _ensure_audio_for_chapter(book_id, chapter_id, segs)
-    colors = _get_char_colors(book_id)
-    result = exporter.export_single_chapter(
-        ch['title'], book['title'], segs, colors, audio_fmt, sub_fmt
-    )
-    return jsonify({
-        'audio_download': f'/api/export/download?path={result["audio_path"]}',
-        'subtitle_download': f'/api/export/download?path={result["subtitle_path"]}',
-        'audio_fmt': result['audio_fmt'],
-        'sub_fmt': result['sub_fmt'],
-    })
+    job_id, _ = _make_export_job()
+    threading.Thread(
+        target=_run_chapter_export,
+        args=(job_id, book_id, chapter_id, audio_fmt, sub_fmt),
+        daemon=True,
+    ).start()
+    return jsonify({'job_id': job_id})
 
 
 @app.route('/api/books/<int:book_id>/export/full', methods=['POST'])
 def export_full(book_id):
     body = request.get_json(force=True) or {}
     audio_fmt = body.get('audio_fmt', 'wav')
-    sub_fmt = body.get('sub_fmt', 'ass')
+    sub_fmt = _resolve_sub_fmt(book_id, body.get('sub_fmt', 'srt'))
 
     if tts.status()['state'] != 'ready':
         return jsonify({'error': 'TTS model not ready'}), 503
 
-    with get_conn() as conn:
-        book = conn.execute('SELECT * FROM books WHERE id=?', (book_id,)).fetchone()
-        chapters = conn.execute(
-            'SELECT id FROM chapters WHERE book_id=? ORDER BY order_num', (book_id,)
-        ).fetchall()
-
-    all_segs = []
-    for ch in chapters:
-        segs = _get_chapter_segments(ch['id'], book_id)
-        _ensure_audio_for_chapter(book_id, ch['id'], segs)
-        all_segs.extend(segs)
-
-    colors = _get_char_colors(book_id)
-    result = exporter.export_full_book(book['title'], all_segs, colors, audio_fmt, sub_fmt)
-    return jsonify({
-        'audio_download': f'/api/export/download?path={result["audio_path"]}',
-        'subtitle_download': f'/api/export/download?path={result["subtitle_path"]}',
-        'audio_fmt': result['audio_fmt'],
-        'sub_fmt': result['sub_fmt'],
-    })
+    job_id, _ = _make_export_job()
+    threading.Thread(
+        target=_run_full_export,
+        args=(job_id, book_id, audio_fmt, sub_fmt),
+        daemon=True,
+    ).start()
+    return jsonify({'job_id': job_id})
 
 
 @app.route('/api/books/<int:book_id>/export/chapterwise', methods=['POST'])
 def export_chapterwise(book_id):
     body = request.get_json(force=True) or {}
     audio_fmt = body.get('audio_fmt', 'wav')
-    sub_fmt = body.get('sub_fmt', 'ass')
+    sub_fmt = _resolve_sub_fmt(book_id, body.get('sub_fmt', 'srt'))
 
     if tts.status()['state'] != 'ready':
         return jsonify({'error': 'TTS model not ready'}), 503
 
-    with get_conn() as conn:
-        book = conn.execute('SELECT * FROM books WHERE id=?', (book_id,)).fetchone()
-        chapters = conn.execute(
-            'SELECT id, title FROM chapters WHERE book_id=? ORDER BY order_num', (book_id,)
-        ).fetchall()
+    job_id, _ = _make_export_job()
+    threading.Thread(
+        target=_run_chapterwise_export,
+        args=(job_id, book_id, audio_fmt, sub_fmt),
+        daemon=True,
+    ).start()
+    return jsonify({'job_id': job_id})
 
-    chapters_data = []
-    for ch in chapters:
-        segs = _get_chapter_segments(ch['id'], book_id)
-        _ensure_audio_for_chapter(book_id, ch['id'], segs)
-        if segs:
-            chapters_data.append({'chapter_title': ch['title'], 'segments': segs})
 
-    colors = _get_char_colors(book_id)
-    zip_path = exporter.export_chapter_zip(book['title'], chapters_data, colors, audio_fmt, sub_fmt)
-    return jsonify({'zip_download': f'/api/export/download?path={zip_path}'})
+@app.route('/api/export/status/<job_id>')
+def export_job_status(job_id):
+    job = _export_jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'Unknown job'}), 404
+    return jsonify(job)
 
 
 @app.route('/api/export/download')

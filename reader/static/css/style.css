@@ -585,7 +585,16 @@ code {
 }
 .export-section label { display: block; font-size: 0.83rem; margin: 4px 0; cursor: pointer; color: var(--text2); }
 .export-section label:hover { color: var(--text); }
-.export-status { font-size: 0.78rem; color: var(--text2); margin-top: 6px; min-height: 18px; }
+.export-progress-wrap {
+  height: 4px; background: var(--border); border-radius: 2px;
+  margin: 8px 0 4px; overflow: hidden; display: none;
+}
+.export-progress-wrap.active { display: block; }
+.export-progress-fill {
+  height: 100%; width: 0%; background: var(--accent);
+  border-radius: 2px; transition: width 0.35s ease;
+}
+.export-status { font-size: 0.78rem; color: var(--text2); margin-top: 4px; min-height: 18px; }
 
 /* ── Voice Studio ───────────────────────────────────────────────────────────── */
 .studio-page { max-width: 960px; margin: 0 auto; padding: 36px 28px 100px; }

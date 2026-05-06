@@ -84,10 +84,15 @@
         </div>
         <div class="export-section">
           <b>Subtitles</b>
+          {% if not book.single_narrator_mode %}
           <label><input type="radio" name="exp-sub" value="ass" checked> ASS (styled, per-character)</label>
-          <label><input type="radio" name="exp-sub" value="srt"> SRT (plain)</label>
+          {% endif %}
+          <label><input type="radio" name="exp-sub" value="srt"{% if book.single_narrator_mode %} checked{% endif %}> SRT (plain)</label>
         </div>
         <button class="btn btn-primary btn-full" id="do-export-btn">Generate &amp; Download</button>
+        <div class="export-progress-wrap" id="export-progress-wrap">
+          <div class="export-progress-fill" id="export-progress-fill"></div>
+        </div>
         <div id="export-status" class="export-status"></div>
       </div>
     </div>
@@ -120,5 +125,6 @@
 {% endblock %}
 {% block scripts %}
 <script>window.BOOK_ID = {{ book.id }};</script>
+<script>window.SINGLE_NARRATOR_MODE = {{ 1 if book.single_narrator_mode else 0 }};</script>
 <script src="/static/js/reader.js"></script>
 {% endblock %}

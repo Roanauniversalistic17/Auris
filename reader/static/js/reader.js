@@ -592,35 +592,78 @@ document.getElementById('export-btn').onclick = () => {
 };
 
 document.getElementById('do-export-btn').onclick = async () => {
-  const mode     = document.querySelector('input[name="exp-mode"]:checked').value;
-  const audioFmt = document.querySelector('input[name="exp-audio"]:checked').value;
-  const subFmt   = document.querySelector('input[name="exp-sub"]:checked').value;
-  const status   = document.getElementById('export-status');
-  status.textContent = 'Generating… this may take a while.';
+  if (!currentChapterId) { showToast('Open a chapter first.'); return; }
 
-  const body = { audio_fmt: audioFmt, sub_fmt: subFmt };
+  const mode      = document.querySelector('input[name="exp-mode"]:checked').value;
+  const audioFmt  = document.querySelector('input[name="exp-audio"]:checked').value;
+  const subInput  = document.querySelector('input[name="exp-sub"]:checked');
+  const subFmt    = subInput ? subInput.value : 'srt';
+
+  const status    = document.getElementById('export-status');
+  const progWrap  = document.getElementById('export-progress-wrap');
+  const progFill  = document.getElementById('export-progress-fill');
+  const doBtn     = document.getElementById('do-export-btn');
+
+  doBtn.disabled = true;
+  progWrap.classList.add('active');
+  progFill.style.width = '0%';
+  status.textContent = 'Starting export…';
+
   let url;
-  if (mode === 'chapter')      url = `/api/books/${BOOK_ID}/export/chapter/${currentChapterId}`;
+  if (mode === 'chapter')          url = `/api/books/${BOOK_ID}/export/chapter/${currentChapterId}`;
   else if (mode === 'chapterwise') url = `/api/books/${BOOK_ID}/export/chapterwise`;
-  else                         url = `/api/books/${BOOK_ID}/export/full`;
+  else                             url = `/api/books/${BOOK_ID}/export/full`;
+
+  const finish = (msg) => {
+    status.textContent = msg;
+    setTimeout(() => {
+      progWrap.classList.remove('active');
+      progFill.style.width = '0%';
+      doBtn.disabled = false;
+    }, 2000);
+  };
 
   try {
     const r = await fetch(url, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body),
+      body: JSON.stringify({ audio_fmt: audioFmt, sub_fmt: subFmt }),
     });
     const d = await r.json();
-    if (d.error) { status.textContent = d.error; return; }
-    status.textContent = 'Ready. Downloading…';
-    if (d.zip_download) {
-      window.location.href = d.zip_download;
-    } else {
-      if (d.audio_download)    window.open(d.audio_download);
-      if (d.subtitle_download) setTimeout(() => window.open(d.subtitle_download), 500);
+    if (d.error) { finish(d.error); return; }
+
+    const jobId = d.job_id;
+
+    while (true) {
+      await new Promise(res => setTimeout(res, 800));
+      let sr;
+      try { sr = await fetch(`/api/export/status/${jobId}`).then(r => r.json()); }
+      catch(_) { continue; }
+
+      if (sr.total > 0) {
+        const pct = Math.min(Math.round((sr.done / sr.total) * 95), 95);
+        progFill.style.width = pct + '%';
+      }
+      status.textContent = sr.message || 'Working…';
+
+      if (sr.state === 'complete') {
+        progFill.style.width = '100%';
+        const res = sr.result;
+        if (res.zip_download) {
+          window.location.href = res.zip_download;
+        } else {
+          if (res.audio_download)    window.open(res.audio_download);
+          if (res.subtitle_download) setTimeout(() => window.open(res.subtitle_download), 500);
+        }
+        finish('Done. Downloading…');
+        break;
+      } else if (sr.state === 'failed') {
+        finish('Export failed: ' + (sr.error || 'Unknown error'));
+        break;
+      }
     }
   } catch(e) {
-    status.textContent = e.message;
+    finish(e.message);
   }
 };
 
