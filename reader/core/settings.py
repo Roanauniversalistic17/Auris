@@ -19,6 +19,8 @@ SETTINGS_FILE = _APP_DIR / 'data' / 'settings.json'
 
 # Default model path = <repo_root>/model_backup/OmniVoice
 _DEFAULT_MODEL_PATH = str(_REPO_ROOT / 'model_backup' / 'OmniVoice')
+LEGACY_NARRATOR_INSTRUCT = 'female, middle-aged, moderate pitch, american accent'
+DEFAULT_NARRATOR_INSTRUCT = 'male, elderly, low pitch, british accent'
 
 DEFAULTS: dict = {
     # Model
@@ -28,7 +30,7 @@ DEFAULTS: dict = {
     'hf_endpoint': '',                 # e.g. https://hf-mirror.com for restricted networks
 
     # Narrator
-    'narrator_instruct': 'female, middle-aged, moderate pitch, american accent',
+    'narrator_instruct': DEFAULT_NARRATOR_INSTRUCT,
     'single_narrator_mode': False,
 
     # Playback defaults
@@ -52,7 +54,11 @@ def load() -> dict:
         try:
             with open(SETTINGS_FILE, encoding='utf-8') as f:
                 saved = json.load(f)
-            return {**DEFAULTS, **saved}
+            merged = {**DEFAULTS, **saved}
+            narrator_instruct = str(merged.get('narrator_instruct') or '').strip().lower()
+            if narrator_instruct in {'', LEGACY_NARRATOR_INSTRUCT.lower()}:
+                merged['narrator_instruct'] = DEFAULT_NARRATOR_INSTRUCT
+            return merged
         except Exception:
             pass
     return dict(DEFAULTS)

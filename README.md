@@ -4,6 +4,20 @@ Offline audiobook reader for EPUB, PDF, and TXT with local OmniVoice TTS, charac
 
 Everything runs locally after setup. No API keys. No hosted TTS dependency.
 
+## Screenshots
+
+### Library
+![Library](assets/library.png)
+
+### Reader
+![Reader](assets/reader.png)
+
+### Voice Studio
+![Voice Studio](assets/voice_studio.png)
+
+### Settings
+![Settings](assets/settings.png)
+
 ## Highlights
 
 - Import EPUB, PDF, and TXT books.

@@ -231,6 +231,7 @@ function renderContent(segs) {
       return `<span class="word" data-seg="${i}" data-word="${wi}">${esc(w)}</span>`;
     }).join('');
 
+
     const charAttr = seg.character_name ? ` data-char="${esc(seg.character_name)}"` : '';
     const cls = 'sentence' + (seg.is_dialogue ? ' dialogue-sent' : '');
     return `<span class="${cls}" data-idx="${i}"${charAttr} onclick="jumpTo(${i})">${wordSpans}</span> `;
@@ -277,8 +278,8 @@ async function playSegment(idx) {
 
     const data = await r.json();
 
-    // Pre-fetch next segment
-    if (idx + 1 < segments.length) prefetchSegment(idx + 1);
+    // Keep the prefetch buffer full
+    ensurePrefetchBuffer(idx);
 
     audio.src          = data.audio_url + '?t=' + Date.now();
     audio.playbackRate = speedMultiplier;
@@ -291,13 +292,33 @@ async function playSegment(idx) {
   }
 }
 
-function prefetchSegment(idx) {
-  if (idx >= segments.length) return;
-  fetch('/api/tts/generate', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ book_id: BOOK_ID, chapter_id: currentChapterId, segment_index: idx }),
-  }).catch(() => {});
+let currentPrefetchController = null;
+
+async function ensurePrefetchBuffer(startIdx) {
+  if (currentPrefetchController) {
+    currentPrefetchController.abort();
+  }
+  currentPrefetchController = new AbortController();
+  const signal = currentPrefetchController.signal;
+
+  // Prefetch up to 3 segments ahead sequentially
+  for (let i = 1; i <= 3; i++) {
+    const targetIdx = startIdx + i;
+    if (targetIdx >= segments.length) break;
+    
+    if (signal.aborted || !isPlaying) break;
+
+    try {
+      await fetch('/api/tts/generate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ book_id: BOOK_ID, chapter_id: currentChapterId, segment_index: targetIdx }),
+        signal
+      });
+    } catch (e) {
+      break;
+    }
+  }
 }
 
 audio.addEventListener('ended', () => {

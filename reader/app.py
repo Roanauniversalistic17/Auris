@@ -30,7 +30,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 tts = TTSEngine()
 
-DEFAULT_NARRATOR_INSTRUCT = 'female, middle-aged, moderate pitch, american accent'
+DEFAULT_NARRATOR_INSTRUCT = app_settings.DEFAULT_NARRATOR_INSTRUCT
 VOICE_PREVIEW_TEXT = (
     'Hello. This is a voice preview sample. The afternoon is calm, the room is quiet, '
     'and every word should sound clear, steady, and natural.'
@@ -75,7 +75,7 @@ def _clear_book_tts_segments(book_id: int):
         conn.execute('DELETE FROM tts_segments WHERE book_id=?', (book_id,))
 
 
-def _build_segments_for_chapter(book_id: int, chapter_id: int) -> list[dict]:
+def _compute_segments_for_chapter(book_id: int, chapter_id: int) -> list[dict]:
     with get_conn() as conn:
         ch = conn.execute(
             'SELECT * FROM chapters WHERE id=? AND book_id=?',
@@ -99,9 +99,62 @@ def _build_segments_for_chapter(book_id: int, chapter_id: int) -> list[dict]:
         char_map,
         _book_narrator_instruct(dict(book) if book else None),
         single_narrator_mode=_book_single_narrator_mode(dict(book) if book else None),
+        chapter_title=ch['title'],
     )
+    return segs
+
+
+def _build_segments_for_chapter(book_id: int, chapter_id: int) -> list[dict]:
+    segs = _compute_segments_for_chapter(book_id, chapter_id)
+    if not segs:
+        return []
     _store_segments(book_id, chapter_id, segs)
     return segs
+
+
+def _segments_match_rows(segs: list[dict], rows) -> bool:
+    if len(segs) != len(rows):
+        return False
+
+    for idx, (seg, row) in enumerate(zip(segs, rows)):
+        if row['segment_index'] != idx:
+            return False
+        if row['text'] != seg['text']:
+            return False
+        if row['enriched_text'] != seg['enriched_text']:
+            return False
+        if (row['character_name'] or None) != seg['character_name']:
+            return False
+        if (row['instruct'] or None) != seg['instruct']:
+            return False
+        if round(float(row['speed'] or 1.0), 2) != round(float(seg['speed'] or 1.0), 2):
+            return False
+        if bool(row['is_dialogue']) != bool(seg['is_dialogue']):
+            return False
+
+    return True
+
+
+def _ensure_chapter_segments(book_id: int, chapter_id: int):
+    segs = _compute_segments_for_chapter(book_id, chapter_id)
+    if not segs:
+        return []
+
+    with get_conn() as conn:
+        rows = conn.execute(
+            'SELECT * FROM tts_segments WHERE book_id=? AND chapter_id=? ORDER BY segment_index',
+            (book_id, chapter_id)
+        ).fetchall()
+
+    if not _segments_match_rows(segs, rows):
+        _store_segments(book_id, chapter_id, segs)
+        with get_conn() as conn:
+            rows = conn.execute(
+                'SELECT * FROM tts_segments WHERE book_id=? AND chapter_id=? ORDER BY segment_index',
+                (book_id, chapter_id)
+            ).fetchall()
+
+    return rows
 
 
 # ════════════════════════════════════════════════════════════════════════════

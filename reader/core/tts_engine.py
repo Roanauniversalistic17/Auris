@@ -357,6 +357,13 @@ class TTSEngine:
             speed=speed,
             num_step=num_step,
         )
+        
+        # Add 100ms of silence padding to the start of the audio to prevent clipping
+        # the first word when played back in the browser or via Bluetooth.
+        padding_samples = int(SAMPLE_RATE * 0.1)
+        padding = np.zeros(padding_samples, dtype=audio.dtype)
+        audio = np.concatenate((padding, audio))
+        
         sf.write(path, audio, SAMPLE_RATE)
 
         return {

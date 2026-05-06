@@ -1,5 +1,6 @@
 const BOOK_ID = window.BOOK_ID;
 const NARRATOR_INSTRUCT = window.NARRATOR_INSTRUCT || "";
+const DEFAULT_NARRATOR_INSTRUCT = "male, elderly, low pitch, british accent";
 let singleNarratorMode = Boolean(window.SINGLE_NARRATOR_MODE);
 const previewAudio = document.getElementById("preview-audio");
 
@@ -72,10 +73,10 @@ function updateInstructPreview(charId) {
 
 function getNarratorInstruct() {
   return buildInstruct(
-    document.getElementById("narrator-gender")?.value || "female",
-    document.getElementById("narrator-age")?.value || "middle-aged",
-    document.getElementById("narrator-pitch")?.value || "moderate pitch",
-    document.getElementById("narrator-accent")?.value || "american accent"
+    document.getElementById("narrator-gender")?.value || "male",
+    document.getElementById("narrator-age")?.value || "elderly",
+    document.getElementById("narrator-pitch")?.value || "low pitch",
+    document.getElementById("narrator-accent")?.value || "british accent"
   );
 }
 
@@ -104,7 +105,7 @@ function syncSingleNarratorUI() {
 }
 
 function initNarratorControls() {
-  const parsed = parseInstruct(NARRATOR_INSTRUCT);
+  const parsed = parseInstruct(NARRATOR_INSTRUCT || DEFAULT_NARRATOR_INSTRUCT);
   const pairs = [
     ["narrator-gender", parsed.gender],
     ["narrator-age", parsed.age],
