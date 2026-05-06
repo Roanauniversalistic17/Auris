@@ -12,6 +12,25 @@ _SECTION_RE = re.compile(
     r')\b.*$',
     re.IGNORECASE
 )
+_SKIP_SECTION_RE = re.compile(
+    r'^(?:table\s+of\s+contents|contents|copyright\b|other\s+books\s+by\b)$',
+    re.IGNORECASE
+)
+_BACKMATTER_RE = re.compile(
+    r'^(?:you\s+have\s+just\s+finished\s+reading\b|about\s+the\s+author\b|acknowledgements?\b)',
+    re.IGNORECASE
+)
+_COPYRIGHT_RE = re.compile(
+    r'\bcopyright\b|all rights reserved|licensed for your enjoyment only|'
+    r'please buy an additional copy',
+    re.IGNORECASE
+)
+_TOC_CHAPTER_RE = re.compile(
+    r'\bchapter\s+(?:\d+|[ivxlcdm]+|one|two|three|four|five|six|seven|eight|nine|ten'
+    r'|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen'
+    r'|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)\b',
+    re.IGNORECASE
+)
 
 
 def _looks_like_heading(line):
@@ -24,6 +43,26 @@ def _looks_like_heading(line):
         return True
     # All-caps short line
     if line.isupper() and 2 < len(line) < 80:
+        return True
+    return False
+
+
+def _should_skip_section(title, content, started_story):
+    title = (title or '').strip()
+    content = (content or '').strip()
+    lowered = content.lower()
+
+    if not content:
+        return True
+    if _SKIP_SECTION_RE.match(title):
+        return True
+    if _BACKMATTER_RE.match(title):
+        return True
+    if _COPYRIGHT_RE.search(content):
+        return True
+    if 'table of contents' in lowered and len(_TOC_CHAPTER_RE.findall(content)) >= 3:
+        return True
+    if not started_story and len(content.split()) < 120 and not _looks_like_heading(title):
         return True
     return False
 
@@ -52,12 +91,15 @@ def parse(file_path):
     current_title = title
     current_lines = []
     order = 0
+    started_story = False
 
     for line in lines:
         stripped = line.strip()
+        if _BACKMATTER_RE.match(stripped):
+            break
         if _looks_like_heading(stripped):
             content = '\n'.join(current_lines).strip()
-            if len(content) > 100:
+            if len(content) > 100 and not _should_skip_section(current_title, content, started_story):
                 chapters.append({
                     'title': current_title,
                     'order_num': order,
@@ -65,6 +107,7 @@ def parse(file_path):
                     'word_count': len(content.split()),
                 })
                 order += 1
+                started_story = True
             current_title = stripped
             current_lines = []
         else:
@@ -72,7 +115,7 @@ def parse(file_path):
 
     if current_lines:
         content = '\n'.join(current_lines).strip()
-        if len(content) > 50:
+        if len(content) > 50 and not _should_skip_section(current_title, content, started_story):
             chapters.append({
                 'title': current_title,
                 'order_num': order,
