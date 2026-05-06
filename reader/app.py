@@ -59,6 +59,12 @@ def _book_narrator_instruct(book: dict | None) -> str:
     return book.get('narrator_instruct') or _default_narrator_instruct()
 
 
+def _book_single_narrator_mode(book: dict | None) -> bool:
+    if not book:
+        return False
+    return bool(book.get('single_narrator_mode'))
+
+
 def _load_book(book_id: int):
     with get_conn() as conn:
         return conn.execute('SELECT * FROM books WHERE id=?', (book_id,)).fetchone()
@@ -80,7 +86,7 @@ def _build_segments_for_chapter(book_id: int, chapter_id: int) -> list[dict]:
             (book_id,)
         ).fetchall()
         book = conn.execute(
-            'SELECT narrator_instruct FROM books WHERE id=?',
+            'SELECT narrator_instruct, single_narrator_mode FROM books WHERE id=?',
             (book_id,)
         ).fetchone()
 
@@ -92,6 +98,7 @@ def _build_segments_for_chapter(book_id: int, chapter_id: int) -> list[dict]:
         ch['content'],
         char_map,
         _book_narrator_instruct(dict(book) if book else None),
+        single_narrator_mode=_book_single_narrator_mode(dict(book) if book else None),
     )
     _store_segments(book_id, chapter_id, segs)
     return segs
@@ -113,6 +120,7 @@ def reader_page(book_id):
         return 'Book not found', 404
     book_data = dict(book)
     book_data['narrator_instruct'] = _book_narrator_instruct(book_data)
+    book_data['single_narrator_mode'] = _book_single_narrator_mode(book_data)
     return render_template('reader.html', book=book_data)
 
 
@@ -123,6 +131,7 @@ def voice_studio_page(book_id):
         return 'Book not found', 404
     book_data = dict(book)
     book_data['narrator_instruct'] = _book_narrator_instruct(book_data)
+    book_data['single_narrator_mode'] = _book_single_narrator_mode(book_data)
     return render_template('voice_studio.html', book=book_data)
 
 
@@ -160,10 +169,11 @@ def import_book():
 
     with get_conn() as conn:
         cur = conn.execute(
-            'INSERT INTO books (title, author, file_path, file_type, cover_b64, language, total_chapters) '
-            'VALUES (?,?,?,?,?,?,?)',
+            'INSERT INTO books (title, author, file_path, file_type, cover_b64, language, single_narrator_mode, total_chapters) '
+            'VALUES (?,?,?,?,?,?,?,?)',
             (data['title'], data['author'], dest, ext,
-             data.get('cover_b64'), data.get('language', 'en'), len(chapters))
+             data.get('cover_b64'), data.get('language', 'en'),
+             int(bool(app_settings.get('single_narrator_mode', False))), len(chapters))
         )
         book_id = cur.lastrowid
 
@@ -356,26 +366,53 @@ def get_narrator(book_id):
     book = _load_book(book_id)
     if not book:
         return jsonify({'error': 'Not found'}), 404
-    return jsonify({'instruct': _book_narrator_instruct(dict(book))})
+    book_data = dict(book)
+    return jsonify({
+        'instruct': _book_narrator_instruct(book_data),
+        'single_narrator_mode': _book_single_narrator_mode(book_data),
+    })
 
 
 @app.route('/api/books/<int:book_id>/narrator', methods=['PUT'])
 def update_narrator(book_id):
     body = request.get_json(force=True) or {}
-    instruct = (body.get('instruct') or '').strip()
+    book = _load_book(book_id)
+    if not book:
+        return jsonify({'error': 'Not found'}), 404
+    book_data = dict(book)
+
+    raw_instruct = body.get('instruct')
+    instruct = (
+        raw_instruct.strip()
+        if isinstance(raw_instruct, str)
+        else _book_narrator_instruct(book_data)
+    )
     if not instruct:
         return jsonify({'error': 'Narrator instruct is required'}), 400
-    if not _load_book(book_id):
-        return jsonify({'error': 'Not found'}), 404
+
+    raw_mode = body.get('single_narrator_mode', _book_single_narrator_mode(book_data))
+    if isinstance(raw_mode, str):
+        single_narrator_mode = raw_mode.strip().lower() in {'1', 'true', 'yes', 'on'}
+    else:
+        single_narrator_mode = bool(raw_mode)
+    narrator_changed = instruct != _book_narrator_instruct(book_data)
+    mode_changed = single_narrator_mode != _book_single_narrator_mode(book_data)
 
     with get_conn() as conn:
         conn.execute(
-            'UPDATE books SET narrator_instruct=? WHERE id=?',
-            (instruct, book_id)
+            'UPDATE books SET narrator_instruct=?, single_narrator_mode=? WHERE id=?',
+            (instruct, int(single_narrator_mode), book_id)
         )
 
-    _clear_book_tts_segments(book_id)
-    return jsonify({'ok': True, 'instruct': instruct, 'segments_cleared': True})
+    if narrator_changed or mode_changed:
+        _clear_book_tts_segments(book_id)
+
+    return jsonify({
+        'ok': True,
+        'instruct': instruct,
+        'single_narrator_mode': single_narrator_mode,
+        'segments_cleared': narrator_changed or mode_changed,
+    })
 
 
 @app.route('/api/books/<int:book_id>/characters/narrator/preview', methods=['POST'])
@@ -744,7 +781,7 @@ def save_settings():
     previous = app_settings.load()
     allowed = {
         'model_source', 'model_path', 'model_repo', 'hf_endpoint',
-        'narrator_instruct', 'default_speed', 'audio_format',
+        'narrator_instruct', 'single_narrator_mode', 'default_speed', 'audio_format',
         'subtitle_format', 'theme', 'font_size', 'font_family', 'line_height',
     }
     updates = {k: v for k, v in body.items() if k in allowed}

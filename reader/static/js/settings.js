@@ -18,6 +18,7 @@ async function loadSettings() {
 
   // Narrator
   document.getElementById('narrator-instruct').value = _settings.narrator_instruct || '';
+  document.getElementById('default-single-narrator-mode').checked = Boolean(_settings.single_narrator_mode);
 
   // Export
   document.getElementById('audio-format').value    = _settings.audio_format    || 'wav';
@@ -215,6 +216,7 @@ async function saveSettings() {
     model_repo:        document.getElementById('model-repo').value.trim(),
     hf_endpoint:       document.getElementById('hf-endpoint').value.trim(),
     narrator_instruct: document.getElementById('narrator-instruct').value.trim(),
+    single_narrator_mode: document.getElementById('default-single-narrator-mode').checked,
     audio_format:      document.getElementById('audio-format').value,
     subtitle_format:   document.getElementById('subtitle-format').value,
     theme:             document.getElementById('theme-select').value,

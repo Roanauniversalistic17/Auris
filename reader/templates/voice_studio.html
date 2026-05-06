@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Voice Studio — {{ book.title }}{% endblock %}
+{% block title %}Voice Studio - {{ book.title }}{% endblock %}
 {% block content %}
 <div class="studio-page">
   <div class="studio-header">
@@ -44,6 +44,13 @@
               <option value="japanese accent">Japanese</option>
             </select>
           </div>
+          <label class="narrator-mode-row">
+            <input type="checkbox" id="single-narrator-mode">
+            <span>Use this narrator for the whole book</span>
+          </label>
+          <div class="studio-note">
+            When enabled, playback and export use the narrator voice for every line.
+          </div>
           <div class="char-card-footer">
             <span class="instruct-preview" id="narrator-instruct-preview"></span>
             <button class="btn btn-sm btn-ghost preview-btn" data-char-id="narrator">&#9654; Preview</button>
@@ -58,8 +65,9 @@
     <div class="studio-section-title">
       Characters <span id="char-count" class="muted"></span>
     </div>
+    <div id="character-voice-note" class="studio-note hidden"></div>
     <div id="char-list" class="char-list">
-      <div class="loading-spinner">Detecting characters…</div>
+      <div class="loading-spinner">Detecting characters...</div>
     </div>
   </div>
 </div>
@@ -69,5 +77,6 @@
 {% block scripts %}
 <script>window.BOOK_ID = {{ book.id }};</script>
 <script>window.NARRATOR_INSTRUCT = {{ book.narrator_instruct|tojson }};</script>
+<script>window.SINGLE_NARRATOR_MODE = {{ 1 if book.single_narrator_mode else 0 }};</script>
 <script src="/static/js/voice_studio.js"></script>
 {% endblock %}

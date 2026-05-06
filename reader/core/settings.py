@@ -29,6 +29,7 @@ DEFAULTS: dict = {
 
     # Narrator
     'narrator_instruct': 'female, middle-aged, moderate pitch, american accent',
+    'single_narrator_mode': False,
 
     # Playback defaults
     'default_speed': 1.0,

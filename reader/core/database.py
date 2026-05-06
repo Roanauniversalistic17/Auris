@@ -37,6 +37,7 @@ def init_db():
             cover_b64   TEXT,
             language    TEXT DEFAULT 'en',
             narrator_instruct TEXT,
+            single_narrator_mode INTEGER DEFAULT 0,
             added_at    TEXT DEFAULT (datetime('now')),
             last_read   TEXT,
             total_chapters INTEGER DEFAULT 0
@@ -104,3 +105,7 @@ def init_db():
         }
         if "narrator_instruct" not in cols:
             conn.execute("ALTER TABLE books ADD COLUMN narrator_instruct TEXT")
+        if "single_narrator_mode" not in cols:
+            conn.execute(
+                "ALTER TABLE books ADD COLUMN single_narrator_mode INTEGER DEFAULT 0"
+            )

@@ -635,6 +635,21 @@ code {
 
 .voice-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 
+.narrator-mode-row {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 0.82rem; color: var(--text);
+  margin-top: 2px; cursor: pointer;
+}
+
+.narrator-mode-row input {
+  accent-color: var(--accent);
+}
+
+.studio-note {
+  font-size: 0.78rem; color: var(--text2);
+  margin-top: 8px; line-height: 1.5;
+}
+
 .vc-select {
   background: var(--bg3); color: var(--text); border: 1px solid var(--border);
   border-radius: 4px; padding: 4px 8px; font-size: 0.8rem;

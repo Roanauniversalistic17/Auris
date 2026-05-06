@@ -1,5 +1,6 @@
 const BOOK_ID = window.BOOK_ID;
 const NARRATOR_INSTRUCT = window.NARRATOR_INSTRUCT || "";
+let singleNarratorMode = Boolean(window.SINGLE_NARRATOR_MODE);
 const previewAudio = document.getElementById("preview-audio");
 
 const GENDERS = ["male", "female"];
@@ -19,7 +20,7 @@ const ACCENTS = [
 function buildSelect(options, selected, id) {
   return `<select class="vc-select" id="${id}">
     ${options
-      .map((o) => `<option value="${o}"${o === selected ? " selected" : ""}>${o}</option>`)
+      .map((option) => `<option value="${option}"${option === selected ? " selected" : ""}>${option}</option>`)
       .join("")}
   </select>`;
 }
@@ -27,13 +28,13 @@ function buildSelect(options, selected, id) {
 function parseInstruct(instruct) {
   const parts = String(instruct || "")
     .split(",")
-    .map((s) => s.trim().toLowerCase())
+    .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
   return {
-    gender: parts.find((p) => GENDERS.includes(p)) || "female",
-    age: AGES.find((a) => parts.includes(a)) || "young adult",
-    pitch: PITCHES.find((p) => parts.includes(p)) || "moderate pitch",
-    accent: ACCENTS.find((a) => parts.includes(a)) || "american accent",
+    gender: parts.find((part) => GENDERS.includes(part)) || "female",
+    age: AGES.find((age) => parts.includes(age)) || "young adult",
+    pitch: PITCHES.find((pitch) => parts.includes(pitch)) || "moderate pitch",
+    accent: ACCENTS.find((accent) => parts.includes(accent)) || "american accent",
   };
 }
 
@@ -41,8 +42,8 @@ function buildInstruct(gender, age, pitch, accent) {
   return [gender, age, pitch, accent].join(", ");
 }
 
-function esc(s) {
-  return String(s || "")
+function esc(value) {
+  return String(value || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
@@ -85,6 +86,23 @@ function updateNarratorPreview() {
   return instruct;
 }
 
+function syncSingleNarratorUI() {
+  const toggle = document.getElementById("single-narrator-mode");
+  if (toggle) toggle.checked = singleNarratorMode;
+
+  const note = document.getElementById("character-voice-note");
+  if (!note) return;
+
+  if (singleNarratorMode) {
+    note.textContent =
+      "Single narrator mode is on. Character voices can still be edited here, but playback and export will use the narrator voice for every line.";
+    note.classList.remove("hidden");
+  } else {
+    note.textContent = "";
+    note.classList.add("hidden");
+  }
+}
+
 function initNarratorControls() {
   const parsed = parseInstruct(NARRATOR_INSTRUCT);
   const pairs = [
@@ -101,7 +119,17 @@ function initNarratorControls() {
     el.addEventListener("change", updateNarratorPreview);
   });
 
+  const toggle = document.getElementById("single-narrator-mode");
+  if (toggle) {
+    toggle.checked = singleNarratorMode;
+    toggle.addEventListener("change", () => {
+      singleNarratorMode = toggle.checked;
+      syncSingleNarratorUI();
+    });
+  }
+
   updateNarratorPreview();
+  syncSingleNarratorUI();
 }
 
 async function loadCharacters() {
@@ -214,10 +242,12 @@ async function saveNarrator() {
   const r = await fetch(`/api/books/${BOOK_ID}/narrator`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ instruct }),
+    body: JSON.stringify({ instruct, single_narrator_mode: singleNarratorMode }),
   });
   const d = await r.json();
   if (d.ok) {
+    singleNarratorMode = Boolean(d.single_narrator_mode);
+    syncSingleNarratorUI();
     flashSaved(document.getElementById("narrator-instruct-preview"));
   } else if (d.error) {
     alert(`Save failed: ${d.error}`);
