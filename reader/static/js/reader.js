@@ -275,11 +275,16 @@ function jumpTo(idx) {
 
 // ── Playback ──────────────────────────────────────────────────────────────────
 
-// Kick off generation for segment 0 only so it is ready (or in flight) when
-// the user presses Play.  Additional segments are chained sequentially by
-// _schedulePreload to avoid competing at the TTS lock.
+// Kick off generation for segment 0 and, critically, the first segment that
+// has no server-cached audio yet (the "frontier").  Firing the frontier at
+// chapter-open time gives it the maximum possible lead before playback
+// reaches it — without it, the chain only fires the frontier after 3–4
+// cached segments play through, which is too late for slow TTS on CPU.
 function _prewarmChapter() {
-  if (segments.length > 0) fetchSegmentData(0);
+  if (!segments.length) return;
+  fetchSegmentData(0);
+  const frontier = segments.findIndex(s => !s.has_audio);
+  if (frontier > 0) fetchSegmentData(frontier);
 }
 
 function fetchSegmentData(idx) {
@@ -304,6 +309,13 @@ async function _schedulePreload(playingIdx) {
   const nextIdx = playingIdx + 1;
   if (nextIdx >= segments.length) return;
 
+  // Fire N+1 first then N+2 so they arrive at the server TTS lock in the
+  // correct order (N+1 queued before N+2).  Two-deep pipeline means a slow
+  // TTS generation for N+1 overlaps with N-1's remaining play time *and*
+  // N's full play time rather than just N's play time.
+  fetchSegmentData(nextIdx);
+  if (nextIdx + 1 < segments.length) fetchSegmentData(nextIdx + 1);
+
   try {
     const data = await fetchSegmentData(nextIdx);
     if (!isPlaying) return;
@@ -315,10 +327,6 @@ async function _schedulePreload(playingIdx) {
       _preloadIdx = nextIdx;
       _preloadData = data;
     }
-
-    // Sequential chain: only start generating nextIdx+1 after nextIdx is fully
-    // ready so the two requests never compete for the TTS lock.
-    if (nextIdx + 1 < segments.length) fetchSegmentData(nextIdx + 1);
   } catch (e) {
     // silent — playSegment will retry via its own fetchSegmentData call
   }
