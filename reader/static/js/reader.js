@@ -33,6 +33,10 @@ let _preloadData = null;
 // bail out when their generation no longer matches the current one.
 let _playGen = 0;
 
+// Cancellation token for the background buffer loop — incremented on each
+// chapter open so the previous loop exits without touching the new chapter.
+let _bufferGenId = 0;
+
 function _standby() { return audio === _audioA ? _audioB : _audioA; }
 function _swapAudio() { audio = (audio === _audioA ? _audioB : _audioA); }
 
@@ -235,6 +239,7 @@ async function openChapter(chapterId, options = {}) {
     behavior: 'auto',
     save: persistOpened,
   });
+  _startBackgroundBuffer(startIdx);
 }
 
 // ── Content rendering ─────────────────────────────────────────────────────────
@@ -285,6 +290,35 @@ function _prewarmChapter() {
   fetchSegmentData(0);
   const frontier = segments.findIndex(s => !s.has_audio);
   if (frontier > 0) fetchSegmentData(frontier);
+}
+
+// Sequentially generates TTS audio for every segment from fromIdx onward.
+// Pauses while the user is actively playing (to avoid competing with the
+// playback pipeline at the TTS lock) and skips ahead to currentSegIdx+3
+// when it resumes so it stays ahead of the cursor.
+async function _startBackgroundBuffer(fromIdx) {
+  const myId = ++_bufferGenId;
+  const myChapterId = currentChapterId;
+
+  for (let i = fromIdx; i < segments.length; i++) {
+    if (_bufferGenId !== myId || currentChapterId !== myChapterId) return;
+
+    if (isPlaying) {
+      // Yield control and skip to just ahead of the playback cursor
+      await new Promise(r => setTimeout(r, 800));
+      i = Math.max(i, currentSegIdx + 3) - 1;
+      continue;
+    }
+
+    try {
+      await fetchSegmentData(i);
+    } catch (_) {}
+
+    // Brief pause between already-cached segments to avoid HTTP bursts
+    if (segments[i] && segments[i].has_audio) {
+      await new Promise(r => setTimeout(r, 150));
+    }
+  }
 }
 
 function fetchSegmentData(idx) {
