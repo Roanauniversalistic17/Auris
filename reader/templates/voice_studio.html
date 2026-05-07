@@ -64,7 +64,7 @@
             <input type="file" accept=".wav" onchange="uploadNarratorRef(event)">
             <button
               id="remove-narrator-ref-btn"
-              class="btn btn-sm btn-ghost{% if not book.narrator_ref_audio_path %} hidden{% endif %}"
+              class="btn btn-sm btn-ghost"
               type="button"
               onclick="removeNarratorRef()"
             >
@@ -93,5 +93,6 @@
 <script>window.BOOK_ID = {{ book.id }};</script>
 <script>window.NARRATOR_INSTRUCT = {{ book.narrator_instruct|tojson }};</script>
 <script>window.SINGLE_NARRATOR_MODE = {{ 1 if book.single_narrator_mode else 0 }};</script>
+<script>window.NARRATOR_HAS_REF_AUDIO = {{ 1 if book.narrator_ref_audio_path else 0 }};</script>
 <script src="/static/js/voice_studio.js"></script>
 {% endblock %}

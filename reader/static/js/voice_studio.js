@@ -92,7 +92,10 @@ function syncNarratorRefUI() {
   const status = document.getElementById("narrator-ref-status");
   const removeBtn = document.getElementById("remove-narrator-ref-btn");
   if (status) status.classList.toggle("hidden", !narratorHasRefAudio);
-  if (removeBtn) removeBtn.classList.toggle("hidden", !narratorHasRefAudio);
+  if (removeBtn) {
+    removeBtn.disabled = !narratorHasRefAudio;
+    removeBtn.title = narratorHasRefAudio ? "" : "No cloned narrator voice is active.";
+  }
 }
 
 function syncSingleNarratorUI() {
