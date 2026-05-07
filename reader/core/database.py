@@ -109,3 +109,40 @@ def init_db():
             conn.execute(
                 "ALTER TABLE books ADD COLUMN single_narrator_mode INTEGER DEFAULT 0"
             )
+        if "narrator_ref_audio_path" not in cols:
+            conn.execute("ALTER TABLE books ADD COLUMN narrator_ref_audio_path TEXT")
+
+    # Remove UNIQUE constraint from tts_segments.cache_key so identical sentences
+    # in different chapters don't cause INSERT OR IGNORE to silently drop segments.
+    import sqlite3 as _sqlite3
+    _mc = _sqlite3.connect(get_db_path())
+    _mc.row_factory = _sqlite3.Row
+    try:
+        tbl = _mc.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='tts_segments'"
+        ).fetchone()
+        if tbl and 'UNIQUE' in (tbl['sql'] or '').upper():
+            _mc.executescript("""
+                PRAGMA foreign_keys=OFF;
+                CREATE TABLE tts_segments_new (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    book_id       INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+                    chapter_id    INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+                    segment_index INTEGER NOT NULL,
+                    text          TEXT NOT NULL,
+                    enriched_text TEXT NOT NULL,
+                    character_name TEXT,
+                    instruct      TEXT,
+                    speed         REAL DEFAULT 1.0,
+                    is_dialogue   INTEGER DEFAULT 0,
+                    audio_path    TEXT,
+                    duration_sec  REAL,
+                    cache_key     TEXT
+                );
+                INSERT INTO tts_segments_new SELECT * FROM tts_segments;
+                DROP TABLE tts_segments;
+                ALTER TABLE tts_segments_new RENAME TO tts_segments;
+                PRAGMA foreign_keys=ON;
+            """)
+    finally:
+        _mc.close()

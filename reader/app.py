@@ -84,6 +84,17 @@ def _book_single_narrator_mode(book: dict | None) -> bool:
     return bool(book.get('single_narrator_mode'))
 
 
+def _book_narrator_ref_audio(book_id: int) -> str | None:
+    with get_conn() as conn:
+        row = conn.execute(
+            'SELECT narrator_ref_audio_path FROM books WHERE id=?', (book_id,)
+        ).fetchone()
+    if not row:
+        return None
+    path = row['narrator_ref_audio_path']
+    return path if path and os.path.exists(path) else None
+
+
 def _load_book(book_id: int):
     with get_conn() as conn:
         return conn.execute('SELECT * FROM books WHERE id=?', (book_id,)).fetchone()
@@ -504,10 +515,12 @@ def preview_narrator(book_id):
         return jsonify({'error': 'Model not ready', 'status': status}), 503
 
     instruct = (body.get('instruct') or _book_narrator_instruct(dict(book))).strip()
+    narrator_ref = _book_narrator_ref_audio(book_id)
     try:
         result = tts.generate_preview(
             instruct=instruct,
             sample_text=VOICE_PREVIEW_TEXT,
+            ref_audio=narrator_ref,
         )
         return jsonify({'audio_url': f'/api/audio/{result["cache_key"]}'})
     except Exception as e:
@@ -526,6 +539,19 @@ def upload_ref_audio(char_id):
         conn.execute('UPDATE characters SET ref_audio_path=? WHERE id=?', (path, char_id))
     if row:
         _clear_book_tts_segments(row['book_id'])
+    return jsonify({'ok': True, 'path': path})
+
+
+@app.route('/api/books/<int:book_id>/narrator-ref-audio', methods=['POST'])
+def upload_narrator_ref_audio(book_id):
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file'}), 400
+    f = request.files['file']
+    path = os.path.join(UPLOAD_DIR, f'narrator_ref_{book_id}.wav')
+    f.save(path)
+    with get_conn() as conn:
+        conn.execute('UPDATE books SET narrator_ref_audio_path=? WHERE id=?', (path, book_id))
+    _clear_book_tts_segments(book_id)
     return jsonify({'ok': True, 'path': path})
 
 
@@ -594,15 +620,15 @@ def tts_generate():
             'cached': True,
         })
 
-    with get_conn() as conn:
-        char = None
-        if seg['character_name']:
+    if seg['character_name']:
+        with get_conn() as conn:
             char = conn.execute(
                 'SELECT * FROM characters WHERE book_id=? AND name=?',
                 (book_id, seg['character_name'])
             ).fetchone()
-
-    ref_audio = dict(char)['ref_audio_path'] if char and char['ref_audio_path'] else None
+        ref_audio = dict(char)['ref_audio_path'] if char and char['ref_audio_path'] else None
+    else:
+        ref_audio = _book_narrator_ref_audio(book_id)
 
     try:
         result = tts.generate(
@@ -693,13 +719,17 @@ def _ensure_audio_for_chapter(book_id: int, chapter_id: int, segs: list[dict], j
                 'SELECT * FROM characters WHERE book_id=?', (book_id,)
             ).fetchall()
         }
+    narrator_ref = _book_narrator_ref_audio(book_id)
     for seg in segs:
         if seg.get('audio_path') and os.path.exists(seg['audio_path']):
             if job is not None:
                 job['done'] = job.get('done', 0) + 1
             continue
         char = chars.get(seg['character_name']) if seg['character_name'] else None
-        ref_audio = char['ref_audio_path'] if char and char.get('ref_audio_path') else None
+        if char:
+            ref_audio = char['ref_audio_path'] if char.get('ref_audio_path') else None
+        else:
+            ref_audio = narrator_ref
         try:
             result = tts.generate(
                 text=seg['enriched_text'],

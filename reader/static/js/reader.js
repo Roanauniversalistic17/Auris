@@ -293,9 +293,10 @@ function _prewarmChapter() {
 }
 
 // Sequentially generates TTS audio for every segment from fromIdx onward.
-// Pauses while the user is actively playing (to avoid competing with the
-// playback pipeline at the TTS lock) and skips ahead to currentSegIdx+3
-// when it resumes so it stays ahead of the cursor.
+// Waits until playback is idle before firing each request so it never
+// competes with the active playback pipeline at the server TTS lock.
+// Skips ahead to currentSegIdx+3 after each playback pause so it stays
+// ahead of the cursor when the user is reading without playing.
 async function _startBackgroundBuffer(fromIdx) {
   const myId = ++_bufferGenId;
   const myChapterId = currentChapterId;
@@ -303,10 +304,21 @@ async function _startBackgroundBuffer(fromIdx) {
   for (let i = fromIdx; i < segments.length; i++) {
     if (_bufferGenId !== myId || currentChapterId !== myChapterId) return;
 
-    if (isPlaying) {
-      // Yield control and skip to just ahead of the playback cursor
-      await new Promise(r => setTimeout(r, 800));
+    // Wait out any active playback before sending a new TTS request
+    while (isPlaying) {
+      await new Promise(r => setTimeout(r, 600));
+      if (_bufferGenId !== myId || currentChapterId !== myChapterId) return;
+      // Stay ahead of the cursor, not behind it
       i = Math.max(i, currentSegIdx + 3) - 1;
+    }
+
+    // Re-check cancellation after the wait
+    if (_bufferGenId !== myId || currentChapterId !== myChapterId) return;
+
+    // Skip segments already in the promise cache (fetched by preload or prewarm)
+    if (_segCache.has(i)) {
+      try { await _segCache.get(i); } catch (_) {}
+      await new Promise(r => setTimeout(r, 100));
       continue;
     }
 
@@ -314,10 +326,8 @@ async function _startBackgroundBuffer(fromIdx) {
       await fetchSegmentData(i);
     } catch (_) {}
 
-    // Brief pause between already-cached segments to avoid HTTP bursts
-    if (segments[i] && segments[i].has_audio) {
-      await new Promise(r => setTimeout(r, 150));
-    }
+    // Small throttle between generations to let the event loop breathe
+    await new Promise(r => setTimeout(r, 100));
   }
 }
 
@@ -421,8 +431,22 @@ function _onAudioEnded() {
     stopPlayback();
   }
 }
+
+function _onAudioError() {
+  stopWordHighlight();
+  if (!isPlaying) return;
+  // Evict cached promise so the segment will be re-fetched on retry
+  _segCache.delete(currentSegIdx);
+  // Skip the broken segment rather than stopping entirely
+  const next = currentSegIdx + 1;
+  if (next < segments.length) playSegment(next);
+  else stopPlayback();
+}
+
 _audioA.addEventListener('ended', _onAudioEnded);
 _audioB.addEventListener('ended', _onAudioEnded);
+_audioA.addEventListener('error', _onAudioError);
+_audioB.addEventListener('error', _onAudioError);
 
 function stopPlayback() {
   isPlaying = false;

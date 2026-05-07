@@ -238,6 +238,25 @@ async function uploadRef(event, charId) {
   }
 }
 
+async function uploadNarratorRef(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const fd = new FormData();
+  fd.append("file", file);
+
+  const r = await fetch(`/api/books/${BOOK_ID}/narrator-ref-audio`, {
+    method: "POST",
+    body: fd,
+  });
+  const d = await r.json();
+  if (d.ok) {
+    alert("Narrator reference audio saved. Existing audio will be regenerated with the cloned voice.");
+  } else if (d.error) {
+    alert(`Upload failed: ${d.error}`);
+  }
+}
+
 async function saveNarrator() {
   const instruct = updateNarratorPreview();
   const r = await fetch(`/api/books/${BOOK_ID}/narrator`, {
@@ -279,4 +298,5 @@ loadCharacters();
 window.saveChar = saveChar;
 window.previewChar = previewChar;
 window.uploadRef = uploadRef;
+window.uploadNarratorRef = uploadNarratorRef;
 window.saveNarrator = saveNarrator;
