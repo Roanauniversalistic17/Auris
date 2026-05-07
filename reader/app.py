@@ -34,6 +34,22 @@ tts = TTSEngine()
 DEFAULT_NARRATOR_INSTRUCT = app_settings.DEFAULT_NARRATOR_INSTRUCT
 
 _export_jobs: dict = {}
+
+# Per-chapter locks prevent concurrent segment building from racing on the
+# DELETE + INSERT in _store_segments when multiple requests hit the same
+# chapter before segments are built (e.g. parallel prewarm requests).
+_chapter_build_locks: dict = {}
+_chapter_build_locks_meta = threading.Lock()
+
+
+def _get_chapter_build_lock(book_id: int, chapter_id: int) -> threading.Lock:
+    key = (book_id, chapter_id)
+    with _chapter_build_locks_meta:
+        if key not in _chapter_build_locks:
+            _chapter_build_locks[key] = threading.Lock()
+        return _chapter_build_locks[key]
+
+
 VOICE_PREVIEW_TEXT = (
     'Hello. This is a voice preview sample. The afternoon is calm, the room is quiet, '
     'and every word should sound clear, steady, and natural.'
@@ -546,14 +562,22 @@ def tts_generate():
         ).fetchone()
 
     if not seg:
-        if not _build_segments_for_chapter(book_id, chapter_id):
-            return jsonify({'error': 'Chapter not found'}), 404
-
-        with get_conn() as conn:
-            seg = conn.execute(
-                'SELECT * FROM tts_segments WHERE book_id=? AND chapter_id=? AND segment_index=?',
-                (book_id, chapter_id, segment_index)
-            ).fetchone()
+        ch_lock = _get_chapter_build_lock(book_id, chapter_id)
+        with ch_lock:
+            # Re-check after acquiring the lock: another thread may have built it.
+            with get_conn() as conn:
+                seg = conn.execute(
+                    'SELECT * FROM tts_segments WHERE book_id=? AND chapter_id=? AND segment_index=?',
+                    (book_id, chapter_id, segment_index)
+                ).fetchone()
+            if not seg:
+                if not _build_segments_for_chapter(book_id, chapter_id):
+                    return jsonify({'error': 'Chapter not found'}), 404
+                with get_conn() as conn:
+                    seg = conn.execute(
+                        'SELECT * FROM tts_segments WHERE book_id=? AND chapter_id=? AND segment_index=?',
+                        (book_id, chapter_id, segment_index)
+                    ).fetchone()
 
     if not seg:
         return jsonify({'error': 'Segment index out of range'}), 404
@@ -609,22 +633,12 @@ def tts_generate():
 
 @app.route('/api/tts/segments/<int:book_id>/<int:chapter_id>')
 def get_segments(book_id, chapter_id):
-    """Return all segment metadata for a chapter (pre-enrich if needed)."""
-    with get_conn() as conn:
-        rows = conn.execute(
-            'SELECT * FROM tts_segments WHERE book_id=? AND chapter_id=? ORDER BY segment_index',
-            (book_id, chapter_id)
-        ).fetchall()
-
+    """Return segment metadata, rebuilding if enriched_text is stale (e.g. emotion tags changed)."""
+    ch_lock = _get_chapter_build_lock(book_id, chapter_id)
+    with ch_lock:
+        rows = _ensure_chapter_segments(book_id, chapter_id)
     if not rows:
-        if not _build_segments_for_chapter(book_id, chapter_id):
-            return jsonify([])
-        with get_conn() as conn:
-            rows = conn.execute(
-                'SELECT * FROM tts_segments WHERE book_id=? AND chapter_id=? ORDER BY segment_index',
-                (book_id, chapter_id)
-            ).fetchall()
-
+        return jsonify([])
     return jsonify([{
         'segment_index': r['segment_index'],
         'text': r['text'],

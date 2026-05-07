@@ -275,48 +275,52 @@ function jumpTo(idx) {
 
 // ── Playback ──────────────────────────────────────────────────────────────────
 
-// Fire generation requests for the first N segments so they are ready (or in
-// flight) by the time the user presses Play.
+// Kick off generation for segment 0 only so it is ready (or in flight) when
+// the user presses Play.  Additional segments are chained sequentially by
+// _schedulePreload to avoid competing at the TTS lock.
 function _prewarmChapter() {
-  const n = Math.min(8, segments.length);
-  for (let i = 0; i < n; i++) fetchSegmentData(i);
+  if (segments.length > 0) fetchSegmentData(0);
 }
 
 function fetchSegmentData(idx) {
   if (!_segCache.has(idx)) {
-    _segCache.set(idx, fetch('/api/tts/generate', {
+    const p = fetch('/api/tts/generate', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ book_id: BOOK_ID, chapter_id: currentChapterId, segment_index: idx }),
     }).then(r => {
       if (!r.ok) return r.json().then(e => { throw new Error(e.error || `HTTP ${r.status}`); });
       return r.json();
-    }));
+    });
+    // Evict on failure so the next call retries rather than re-throwing the cached rejection.
+    p.catch(() => _segCache.delete(idx));
+    _segCache.set(idx, p);
   }
   return _segCache.get(idx);
 }
 
 async function _schedulePreload(playingIdx) {
+  if (!isPlaying) return;
   const nextIdx = playingIdx + 1;
-  if (nextIdx >= segments.length || !isPlaying) return;
-
-  // Fire off generate requests for 2–8 ahead in parallel to warm the server cache
-  for (let i = 2; i <= 8; i++) {
-    const ahead = playingIdx + i;
-    if (ahead < segments.length) fetchSegmentData(ahead);
-  }
+  if (nextIdx >= segments.length) return;
 
   try {
     const data = await fetchSegmentData(nextIdx);
-    if (!isPlaying || _preloadIdx === nextIdx) return;
+    if (!isPlaying) return;
 
-    const sb = _standby();
-    sb.src = data.audio_url;
-    sb.playbackRate = speedMultiplier;
-    _preloadIdx = nextIdx;
-    _preloadData = data;
+    if (_preloadIdx !== nextIdx) {
+      const sb = _standby();
+      sb.src = data.audio_url;
+      sb.playbackRate = speedMultiplier;
+      _preloadIdx = nextIdx;
+      _preloadData = data;
+    }
+
+    // Sequential chain: only start generating nextIdx+1 after nextIdx is fully
+    // ready so the two requests never compete for the TTS lock.
+    if (nextIdx + 1 < segments.length) fetchSegmentData(nextIdx + 1);
   } catch (e) {
-    // silent — playback will continue without the preload, just with a small gap
+    // silent — playSegment will retry via its own fetchSegmentData call
   }
 }
 
@@ -477,7 +481,11 @@ document.getElementById('btn-play').onclick = () => {
   }
 };
 
-document.getElementById('btn-stop').onclick  = stopPlayback;
+document.getElementById('btn-stop').onclick = () => {
+  stopPlayback();
+  // True stop: go back to the beginning of the chapter, not just pause in place.
+  if (currentChapterId) setCurrentSegment(0, { highlight: true, behavior: 'smooth', save: true });
+};
 
 document.getElementById('btn-next-seg').onclick = () => {
   const next = Math.min(currentSegIdx + 1, segments.length - 1);
