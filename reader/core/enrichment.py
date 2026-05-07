@@ -358,44 +358,84 @@ def _find_speaker(sentence: str, dialogue_map: dict, last_speaker: str | None) -
     return None
 
 
-def _select_expression_tag(sentence: str, context: str) -> str | None:
+def _explicit_tag_text(sentence: str) -> str:
+    sentence = str(sentence or "").strip()
+    inner = _STANDALONE_QUOTE_RE.search(sentence)
+    if not inner:
+        return sentence
+
+    quoted = inner.group(1).strip()
+    prefix = sentence[:inner.start()].strip(" ,.-")
+    suffix = sentence[inner.end():].strip(" ,.-")
+    parts = [part for part in (quoted, prefix, suffix) if part]
+    return " ".join(parts).strip()
+
+
+def _should_allow_confirmation_tag(text: str, is_dialogue: bool) -> bool:
+    if not is_dialogue:
+        return False
+
+    normalized = re.sub(r"[^a-zA-Z0-9\s']", " ", str(text or "").lower())
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if not normalized:
+        return False
+
+    words = normalized.split()
+    if len(words) > 4:
+        return False
+
+    allowed_phrases = {
+        "yes", "yeah", "yep", "yup", "okay", "ok", "sure", "right",
+        "indeed", "exactly", "correct", "of course", "certainly",
+        "i know", "i see", "all right",
+    }
+    return normalized in allowed_phrases
+
+
+def _select_expression_tag(sentence: str, context: str, is_dialogue: bool) -> str | None:
     is_question   = bool(_QUESTION_RE.search(sentence))
     is_exclamation = bool(_SURPRISE_RE.search(sentence))
+    tag_text = _explicit_tag_text(sentence)
 
     # Questions (punctuation beats context for ordering; context picks the flavour)
-    if is_question or _QUESTION_HINT_RE.search(context):
-        if _SKEPTIC_CONTEXT_RE.search(context):
+    if is_question or _QUESTION_HINT_RE.search(tag_text):
+        if _SKEPTIC_CONTEXT_RE.search(tag_text):
             return "[question-ei]"         # sceptical / rhetorical
-        if _SHOCK_CONTEXT_RE.search(context) or _SHOCKED_QUESTION_END_RE.search(sentence):
+        if _SHOCK_CONTEXT_RE.search(tag_text) or _SHOCKED_QUESTION_END_RE.search(sentence):
             return "[question-oh]"         # shocked / disbelieving
-        if _WONDER_CONTEXT_RE.search(context):
+        if _WONDER_CONTEXT_RE.search(tag_text):
             return "[question-ah]"         # curious / wondering
         return "[question-en]"             # plain question
 
-    # Explicit emotion attribution (laughed, sighed, grumbled, nodded …)
-    for pattern, tag in _TAG_RULES:
-        if pattern.search(context):
+    # Explicit emotion attribution should be sentence-local, otherwise nearby
+    # narration leaks non-verbal sounds like "mm" into unrelated lines.
+    if is_dialogue:
+        for pattern, tag in _TAG_RULES:
+            if not pattern.search(tag_text):
+                continue
+            if tag == "[confirmation-en]" and not _should_allow_confirmation_tag(tag_text, is_dialogue):
+                continue
             return tag
 
     # Quiet realizations don't need an exclamation mark to warrant a tag
-    if _MILD_REALIZATION_RE.search(context):
+    if _MILD_REALIZATION_RE.search(tag_text):
         return "[surprise-ah]"
 
     # Surprise / exclamation — differentiated by intensity
-    if is_exclamation or _SURPRISE_HINT_RE.search(context):
-        if _STRONG_SURPRISE_RE.search(context):
+    if is_exclamation or _SURPRISE_HINT_RE.search(tag_text):
+        if _STRONG_SURPRISE_RE.search(tag_text):
             return "[surprise-wa]"         # jaw-drop / scream shock
-        if _EXCITED_SURPRISE_RE.search(context):
+        if _EXCITED_SURPRISE_RE.search(tag_text):
             return "[surprise-yo]"         # triumphant / elated
-        if _MILD_REALIZATION_RE.search(context):
+        if _MILD_REALIZATION_RE.search(tag_text):
             return "[surprise-ah]"         # gentle dawning realization
         return "[surprise-oh]"             # default surprise
 
     return None
 
 
-def _inject_tags(sentence: str, context: str) -> tuple[str, str | None]:
-    tag = _select_expression_tag(sentence, context)
+def _inject_tags(sentence: str, context: str, is_dialogue: bool) -> tuple[str, str | None]:
+    tag = _select_expression_tag(sentence, context, is_dialogue)
     if not tag:
         return sentence, None
 
@@ -447,8 +487,6 @@ def enrich_chapter(
 
     segments = []
     last_speaker = None
-    prev_sentences: list[str] = []
-
     for sentence in sentences:
         sentence = sentence.strip()
         if not sentence:
@@ -483,11 +521,9 @@ def enrich_chapter(
         # Use the last 3 sentences as context so multi-sentence scene build-up
         # (e.g. shock/surprise described two sentences before the dialogue) is
         # captured and the correct emotion tag is selected.
-        context = " ".join(prev_sentences[-3:] + [sentence]).strip()
-        enriched, tag = _inject_tags(sentence, context)
+        context = sentence.strip()
+        enriched, tag = _inject_tags(sentence, context, is_dialogue)
         speed = _segment_speed(sentence, is_dialogue, scene_speed, tag, is_whisper)
-        prev_sentences.append(sentence)
-
         segments.append(
             {
                 "text": sentence,
