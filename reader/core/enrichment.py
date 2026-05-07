@@ -397,15 +397,17 @@ def _select_expression_tag(sentence: str, context: str, is_dialogue: bool) -> st
     is_exclamation = bool(_SURPRISE_RE.search(sentence))
     tag_text = _explicit_tag_text(sentence)
 
-    # Questions (punctuation beats context for ordering; context picks the flavour)
-    if is_question or _QUESTION_HINT_RE.search(tag_text):
+    # Question tags are explicit non-verbal symbols in OmniVoice. Using them on
+    # every normal question adds unwanted pre-utterance sounds, so only keep
+    # them for clearly stylized dialogue questions.
+    if is_dialogue and is_question:
         if _SKEPTIC_CONTEXT_RE.search(tag_text):
             return "[question-ei]"         # sceptical / rhetorical
         if _SHOCK_CONTEXT_RE.search(tag_text) or _SHOCKED_QUESTION_END_RE.search(sentence):
             return "[question-oh]"         # shocked / disbelieving
         if _WONDER_CONTEXT_RE.search(tag_text):
             return "[question-ah]"         # curious / wondering
-        return "[question-en]"             # plain question
+        return None
 
     # Explicit emotion attribution should be sentence-local, otherwise nearby
     # narration leaks non-verbal sounds like "mm" into unrelated lines.
