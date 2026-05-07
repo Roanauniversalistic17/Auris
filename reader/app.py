@@ -118,6 +118,16 @@ def _book_narrator_ref_audio(book_id: int) -> str | None:
     return resolved if os.path.exists(resolved) else None
 
 
+def _delete_file_if_exists(path: str | None):
+    if not isinstance(path, str) or not path.strip():
+        return
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError as exc:
+        log.warning('Unable to delete file %s: %s', path, exc)
+
+
 def _load_book(book_id: int):
     with get_conn() as conn:
         return conn.execute('SELECT * FROM books WHERE id=?', (book_id,)).fetchone()
@@ -576,6 +586,24 @@ def upload_narrator_ref_audio(book_id):
         conn.execute('UPDATE books SET narrator_ref_audio_path=? WHERE id=?', (path, book_id))
     _clear_book_tts_segments(book_id)
     return jsonify({'ok': True, 'path': path})
+
+
+@app.route('/api/books/<int:book_id>/narrator-ref-audio', methods=['DELETE'])
+def delete_narrator_ref_audio(book_id):
+    with get_conn() as conn:
+        row = conn.execute(
+            'SELECT narrator_ref_audio_path FROM books WHERE id=?', (book_id,)
+        ).fetchone()
+        if not row:
+            return jsonify({'error': 'Not found'}), 404
+        path = row['narrator_ref_audio_path']
+        conn.execute(
+            'UPDATE books SET narrator_ref_audio_path=NULL WHERE id=?', (book_id,)
+        )
+
+    _delete_file_if_exists(path)
+    _clear_book_tts_segments(book_id)
+    return jsonify({'ok': True, 'segments_cleared': True})
 
 
 # ════════════════════════════════════════════════════════════════════════════

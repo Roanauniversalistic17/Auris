@@ -2,6 +2,7 @@ const BOOK_ID = window.BOOK_ID;
 const NARRATOR_INSTRUCT = window.NARRATOR_INSTRUCT || "";
 const DEFAULT_NARRATOR_INSTRUCT = "male, elderly, low pitch, british accent";
 let singleNarratorMode = Boolean(window.SINGLE_NARRATOR_MODE);
+let narratorHasRefAudio = Boolean(window.NARRATOR_HAS_REF_AUDIO);
 const previewAudio = document.getElementById("preview-audio");
 
 const GENDERS = ["male", "female"];
@@ -87,6 +88,13 @@ function updateNarratorPreview() {
   return instruct;
 }
 
+function syncNarratorRefUI() {
+  const status = document.getElementById("narrator-ref-status");
+  const removeBtn = document.getElementById("remove-narrator-ref-btn");
+  if (status) status.classList.toggle("hidden", !narratorHasRefAudio);
+  if (removeBtn) removeBtn.classList.toggle("hidden", !narratorHasRefAudio);
+}
+
 function syncSingleNarratorUI() {
   const toggle = document.getElementById("single-narrator-mode");
   if (toggle) toggle.checked = singleNarratorMode;
@@ -131,6 +139,7 @@ function initNarratorControls() {
 
   updateNarratorPreview();
   syncSingleNarratorUI();
+  syncNarratorRefUI();
 }
 
 async function loadCharacters() {
@@ -251,9 +260,26 @@ async function uploadNarratorRef(event) {
   });
   const d = await r.json();
   if (d.ok) {
+    narratorHasRefAudio = true;
+    syncNarratorRefUI();
     alert("Narrator reference audio saved. Existing audio will be regenerated with the cloned voice.");
   } else if (d.error) {
     alert(`Upload failed: ${d.error}`);
+  }
+  event.target.value = "";
+}
+
+async function removeNarratorRef() {
+  const r = await fetch(`/api/books/${BOOK_ID}/narrator-ref-audio`, {
+    method: "DELETE",
+  });
+  const d = await r.json();
+  if (d.ok) {
+    narratorHasRefAudio = false;
+    syncNarratorRefUI();
+    alert("Cloned narrator voice removed. Preview, playback, and export will use the narrator settings again.");
+  } else if (d.error) {
+    alert(`Remove failed: ${d.error}`);
   }
 }
 
@@ -299,4 +325,5 @@ window.saveChar = saveChar;
 window.previewChar = previewChar;
 window.uploadRef = uploadRef;
 window.uploadNarratorRef = uploadNarratorRef;
+window.removeNarratorRef = removeNarratorRef;
 window.saveNarrator = saveNarrator;
