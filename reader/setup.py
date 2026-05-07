@@ -217,7 +217,9 @@ def install_torch(hw_tag):
 def install_omnivoice_deps():
     step("Installing OmniVoice runtime dependencies")
     deps = [
-        "transformers>=5.3.0",
+        # OmniVoice currently loads correctly with 5.3.0; newer 5.x builds can
+        # miss or reshuffle Higgs Audio classes and break model startup.
+        "transformers==5.3.0",
         "accelerate",
         "pydub",
         "tensorboardX",
