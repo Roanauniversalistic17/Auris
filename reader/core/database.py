@@ -115,6 +115,7 @@ def init_db():
     # Remove UNIQUE constraint from tts_segments.cache_key so identical sentences
     # in different chapters don't cause INSERT OR IGNORE to silently drop segments.
     import sqlite3 as _sqlite3
+    import logging as _logging
     _mc = _sqlite3.connect(get_db_path())
     _mc.row_factory = _sqlite3.Row
     try:
@@ -124,6 +125,7 @@ def init_db():
         if tbl and 'UNIQUE' in (tbl['sql'] or '').upper():
             _mc.executescript("""
                 PRAGMA foreign_keys=OFF;
+                DROP TABLE IF EXISTS tts_segments_new;
                 CREATE TABLE tts_segments_new (
                     id            INTEGER PRIMARY KEY AUTOINCREMENT,
                     book_id       INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
@@ -144,5 +146,9 @@ def init_db():
                 ALTER TABLE tts_segments_new RENAME TO tts_segments;
                 PRAGMA foreign_keys=ON;
             """)
+    except Exception as _e:
+        _logging.getLogger(__name__).warning(
+            "cache_key UNIQUE migration failed (non-fatal): %s", _e
+        )
     finally:
         _mc.close()

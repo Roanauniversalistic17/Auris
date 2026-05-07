@@ -40,6 +40,8 @@ _export_jobs: dict = {}
 # chapter before segments are built (e.g. parallel prewarm requests).
 _chapter_build_locks: dict = {}
 _chapter_build_locks_meta = threading.Lock()
+_startup_lock = threading.Lock()
+_startup_complete = False
 
 
 def _get_chapter_build_lock(book_id: int, chapter_id: int) -> threading.Lock:
@@ -62,10 +64,21 @@ VOICE_PREVIEW_TEXT = (
 
 @app.before_request
 def _startup():
-    # Only run once
-    app.before_request_funcs[None].remove(_startup)
-    init_db()
-    tts.load_async()
+    global _startup_complete
+
+    if _startup_complete:
+        return
+
+    with _startup_lock:
+        if _startup_complete:
+            return
+        try:
+            init_db()
+        except Exception:
+            tts.load_async()
+            raise
+        tts.load_async()
+        _startup_complete = True
 
 
 def _default_narrator_instruct() -> str:
@@ -85,14 +98,24 @@ def _book_single_narrator_mode(book: dict | None) -> bool:
 
 
 def _book_narrator_ref_audio(book_id: int) -> str | None:
-    with get_conn() as conn:
-        row = conn.execute(
-            'SELECT narrator_ref_audio_path FROM books WHERE id=?', (book_id,)
-        ).fetchone()
+    try:
+        with get_conn() as conn:
+            row = conn.execute(
+                'SELECT narrator_ref_audio_path FROM books WHERE id=?', (book_id,)
+            ).fetchone()
+    except Exception as exc:
+        log.warning('Unable to load narrator reference audio for book %s: %s', book_id, exc)
+        return None
+
     if not row:
         return None
-    path = row['narrator_ref_audio_path']
-    return path if path and os.path.exists(path) else None
+
+    path = dict(row).get('narrator_ref_audio_path')
+    if not isinstance(path, str) or not path.strip():
+        return None
+
+    resolved = os.path.abspath(path)
+    return resolved if os.path.exists(resolved) else None
 
 
 def _load_book(book_id: int):
@@ -683,11 +706,9 @@ def _store_segments(book_id, chapter_id, segs):
             (book_id, chapter_id)
         )
         for i, s in enumerate(segs):
-            cache_key = tts.cache_key(
-                s['enriched_text'], s['instruct'], None, s['speed']
-            )
+            cache_key = f'pending:{book_id}:{chapter_id}:{i}:{uuid.uuid4().hex}'
             conn.execute(
-                'INSERT OR IGNORE INTO tts_segments '
+                'INSERT INTO tts_segments '
                 '(book_id, chapter_id, segment_index, text, enriched_text, '
                 'character_name, instruct, speed, is_dialogue, cache_key) '
                 'VALUES (?,?,?,?,?,?,?,?,?,?)',
