@@ -43,6 +43,10 @@ _TOC_HINT_RE = re.compile(
     rf"\bchapter\s+(?:\d+|[ivxlcdm]+|{_NUMBER_WORDS})\b",
     re.IGNORECASE,
 )
+_DIVIDER_RE = re.compile(
+    r"^(?:part|prologue|epilogue|foreword|preface|introduction|afterword|appendix|interlude)\b",
+    re.IGNORECASE,
+)
 
 
 class _HTMLLineExtractor(HTMLParser):
@@ -195,8 +199,7 @@ def _split_document(lines):
                 prefix_lines = current_lines[:]
             elif current_title is not None:
                 content = "\n".join(current_lines).strip()
-                if content:
-                    sections.append({"title": current_title.strip(), "content": content})
+                sections.append({"title": current_title.strip(), "content": content})
             current_title = line.strip()
             current_lines = []
         else:
@@ -206,8 +209,7 @@ def _split_document(lines):
         return prefix_lines or current_lines, []
 
     content = "\n".join(current_lines).strip()
-    if content:
-        sections.append({"title": current_title.strip(), "content": content})
+    sections.append({"title": current_title.strip(), "content": content})
 
     return prefix_lines, sections
 
@@ -225,14 +227,18 @@ def _append_to_previous(chapters, extra_lines):
     previous["word_count"] = len(previous["content"].split())
 
 
-def _add_section(chapters, title, content, order_num):
+def _add_section(chapters, title, content, order_num, min_words=None):
+    title = (title or "").strip()
     content = content.strip()
-    if len(content.split()) < 40:
+    if not content:
+        content = title  # divider pages (Part I, Prologue, …) carry their title as content
+    if min_words is None:
+        min_words = 1 if _DIVIDER_RE.match(title) else 40
+    if len(content.split()) < min_words:
         return order_num
-
     chapters.append(
         {
-            "title": title.strip() or f"Section {order_num + 1}",
+            "title": title or f"Section {order_num + 1}",
             "order_num": order_num,
             "content": content,
             "word_count": len(content.split()),
@@ -246,6 +252,25 @@ def _fallback_title(lines, order_num):
         if line and len(line) <= 120:
             return line
     return f"Section {order_num + 1}"
+
+
+def _flatten_toc(toc_items):
+    """Flatten the nested EPUB TOC into [(title, bare_filename)] preserving order."""
+    entries = []
+    for item in toc_items:
+        if isinstance(item, tuple):
+            section, children = item
+            href = getattr(section, "href", "") or ""
+            fname = href.split("#")[0].rsplit("/", 1)[-1]
+            if fname:
+                entries.append((getattr(section, "title", "") or "", fname))
+            entries.extend(_flatten_toc(children))
+        else:
+            href = getattr(item, "href", "") or ""
+            fname = href.split("#")[0].rsplit("/", 1)[-1]
+            if fname:
+                entries.append((getattr(item, "title", "") or "", fname))
+    return entries
 
 
 def parse(file_path):
@@ -287,6 +312,15 @@ def parse(file_path):
         if item and item.get_type() == ebooklib.ITEM_DOCUMENT:
             spine_items.append(item)
 
+    # Build filename → TOC title map from the EPUB navigation document.
+    # First occurrence wins so that anchored sub-entries (#anchor) don't override
+    # the file-level entry.
+    toc_entries = _flatten_toc(book.toc)
+    toc_map: dict = {}
+    for toc_title_val, fname in toc_entries:
+        if fname and fname not in toc_map:
+            toc_map[fname] = toc_title_val
+
     chapters = []
     order = 0
     started_story = False
@@ -300,13 +334,21 @@ def parse(file_path):
         if not text:
             continue
 
+        item_basename = (item.get_name() or "").rsplit("/", 1)[-1]
+        toc_title = toc_map.get(item_basename, "")
+
         first_line = lines[0] if lines else ""
         if in_backmatter:
             continue
         if _BACKMATTER_RE.match(first_line):
             in_backmatter = True
             continue
-        if _should_skip_document(lines, text, started_story):
+
+        # TOC-identified items bypass the front-matter skip heuristic; they are
+        # always real content.  We still skip genuine TOC HTML pages regardless.
+        if _is_toc_document(lines, text):
+            continue
+        if not toc_title and _should_skip_document(lines, text, started_story):
             continue
 
         prefix_lines, sections = _split_document(lines)
@@ -317,23 +359,36 @@ def parse(file_path):
                 order = _add_section(chapters, section["title"], section["content"], order)
             continue
 
-        if chapters:
+        # No headings recognised in the HTML — use the TOC-provided title if
+        # available.  This handles EPUBs where each chapter is a separate file
+        # but the heading text is only in the NCX/NAV, not in the HTML body.
+        if toc_title:
+            chapter_content = "\n".join(prefix_lines).strip()
+            order = _add_section(chapters, toc_title, chapter_content, order, min_words=1)
+            started_story = True
+            continue
+
+        # Headingless spine item with no TOC entry: append to previous chapter
+        # only if the content is small (genuine continuation), otherwise treat
+        # it as its own chapter to avoid swallowing large orphan documents.
+        if chapters and len(text.split()) < 300:
             _append_to_previous(chapters, lines)
             started_story = True
             continue
 
         fallback_docs.append({"lines": lines, "text": text})
 
-    if not chapters:
-        for doc in fallback_docs:
-            order = _add_section(
-                chapters,
-                _fallback_title(doc["lines"], order),
-                doc["text"],
-                order,
-            )
+    # Always drain fallback_docs — large headingless spine items without TOC
+    # entries are better as individual chapters than silently merged.
+    for doc in fallback_docs:
+        order = _add_section(
+            chapters,
+            _fallback_title(doc["lines"], order),
+            doc["text"],
+            order,
+        )
 
-    if not chapters:
+    if not chapters and fallback_docs:
         combined = "\n\n".join(doc["text"] for doc in fallback_docs).strip()
         if combined:
             chapters = [
