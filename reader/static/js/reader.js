@@ -28,6 +28,11 @@ let _segCache = new Map();
 let _preloadIdx = -1;
 let _preloadData = null;
 
+// Monotonic counter — incremented on every new playSegment and on stopPlayback.
+// Each playSegment captures its generation at entry; stale async continuations
+// bail out when their generation no longer matches the current one.
+let _playGen = 0;
+
 function _standby() { return audio === _audioA ? _audioB : _audioA; }
 function _swapAudio() { audio = (audio === _audioA ? _audioB : _audioA); }
 
@@ -202,6 +207,7 @@ async function openChapter(chapterId, options = {}) {
 
   stopPlayback();
   _segCache = new Map();
+  segments = [];           // clear immediately so stale segments can't be played
   currentChapterId = chapterId;
   currentSegIdx    = 0;
 
@@ -219,6 +225,7 @@ async function openChapter(chapterId, options = {}) {
 
   segments = await fetch(`/api/tts/segments/${BOOK_ID}/${chapterId}`).then(r => r.json());
   renderContent(segments);
+  _prewarmChapter();
 
   document.getElementById('chapter-content').scrollTop = 0;
 
@@ -268,6 +275,13 @@ function jumpTo(idx) {
 
 // ── Playback ──────────────────────────────────────────────────────────────────
 
+// Fire generation requests for the first N segments so they are ready (or in
+// flight) by the time the user presses Play.
+function _prewarmChapter() {
+  const n = Math.min(8, segments.length);
+  for (let i = 0; i < n; i++) fetchSegmentData(i);
+}
+
 function fetchSegmentData(idx) {
   if (!_segCache.has(idx)) {
     _segCache.set(idx, fetch('/api/tts/generate', {
@@ -286,8 +300,8 @@ async function _schedulePreload(playingIdx) {
   const nextIdx = playingIdx + 1;
   if (nextIdx >= segments.length || !isPlaying) return;
 
-  // Fire off generate requests for 2–4 ahead in parallel to warm the server cache
-  for (let i = 2; i <= 4; i++) {
+  // Fire off generate requests for 2–8 ahead in parallel to warm the server cache
+  for (let i = 2; i <= 8; i++) {
     const ahead = playingIdx + i;
     if (ahead < segments.length) fetchSegmentData(ahead);
   }
@@ -309,25 +323,32 @@ async function _schedulePreload(playingIdx) {
 async function playSegment(idx) {
   if (idx >= segments.length) { stopPlayback(); return; }
 
+  const gen = ++_playGen;
+
   isPlaying = true;
   setCurrentSegment(idx, { highlight: true, save: true });
 
   const seg = segments[idx];
   const charEl = document.getElementById('pb-character');
-  charEl.textContent = seg.character_name || 'Narrator';
+  const charLabel = seg.character_name || 'Narrator';
+  charEl.textContent = charLabel;
 
   try {
     let data;
 
     if (_preloadIdx === idx && _preloadData) {
-      // Standby element is already buffered with this segment — swap and play instantly
+      // Standby element already buffered — swap and play instantly
       _swapAudio();
       data = _preloadData;
       _preloadIdx = -1;
       _preloadData = null;
     } else {
+      // Show buffering indicator while TTS generates
+      charEl.textContent = `⏳ ${charLabel}`;
       data = await fetchSegmentData(idx);
-      if (!isPlaying) return;
+      // Bail out if a newer playSegment or stopPlayback has since taken over
+      if (gen !== _playGen || !isPlaying) return;
+      charEl.textContent = charLabel;
       audio.src = data.audio_url;
     }
 
@@ -338,6 +359,7 @@ async function playSegment(idx) {
     _schedulePreload(idx);
 
   } catch(e) {
+    if (gen !== _playGen) return;   // stale — a newer segment took over
     charEl.textContent = e.message;
     stopPlayback();
   }
@@ -358,6 +380,7 @@ _audioB.addEventListener('ended', _onAudioEnded);
 
 function stopPlayback() {
   isPlaying = false;
+  _playGen++;            // invalidate any in-flight playSegment coroutine
   stopWordHighlight();
   _audioA.pause();
   _audioB.pause();

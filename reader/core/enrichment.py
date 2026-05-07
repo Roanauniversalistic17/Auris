@@ -447,7 +447,7 @@ def enrich_chapter(
 
     segments = []
     last_speaker = None
-    prev_sentence = ""
+    prev_sentences: list[str] = []
 
     for sentence in sentences:
         sentence = sentence.strip()
@@ -480,12 +480,13 @@ def enrich_chapter(
             if "whisper" not in base:
                 instruct = base + ", whisper"
 
-        # Include the previous sentence as context so cross-sentence attribution
-        # (e.g. "She gasped." … "'Impossible!'" ) is picked up correctly.
-        context = f"{prev_sentence} {sentence}".strip() if prev_sentence else sentence
+        # Use the last 3 sentences as context so multi-sentence scene build-up
+        # (e.g. shock/surprise described two sentences before the dialogue) is
+        # captured and the correct emotion tag is selected.
+        context = " ".join(prev_sentences[-3:] + [sentence]).strip()
         enriched, tag = _inject_tags(sentence, context)
         speed = _segment_speed(sentence, is_dialogue, scene_speed, tag, is_whisper)
-        prev_sentence = sentence
+        prev_sentences.append(sentence)
 
         segments.append(
             {
